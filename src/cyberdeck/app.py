@@ -21,6 +21,7 @@ from . import __version__, storage, theme
 from .clock import ClockPanel
 from .editor import EditorScreen
 from .extras import InfoPanel, parse_symbols
+from .geo import system_city
 from .globe import Globe
 from .system import SystemPanel
 from .weather import WeatherPanel
@@ -168,7 +169,10 @@ class CyberDeck(App):
         self.config = storage.load_json("config.json") or {}
         pinned = self.config.get("location")
         pinned_city = pinned.get("name") if isinstance(pinned, dict) else None
-        self.city = city or self.config.get("city") or pinned_city or None
+        # --city > config city > pinned coordinates > OS timezone (IP guessing lies behind a VPN)
+        chosen = city or self.config.get("city") or pinned_city
+        self.city = chosen or system_city() or None
+        self._city_pinned = bool(chosen)
         self.theme_index = theme.palette_index(self.config.get("theme"))
         theme.set_palette(self.theme_index)
 
@@ -233,7 +237,9 @@ class CyberDeck(App):
         # merge into what is on disk: a hand-edited "location" must survive a theme switch
         fresh = storage.load_json("config.json") or {}
         fresh.update(self.config)
-        fresh.update({"theme": theme.P.name, "city": self.city})
+        fresh["theme"] = theme.P.name
+        if self._city_pinned:
+            fresh["city"] = self.city
         self.config = fresh
         storage.save_json("config.json", fresh)
 

@@ -296,7 +296,8 @@ def _location() -> tuple[float, float, str] | None:
         if isinstance(lon, list):
             lon = lon[0]["value"]
         name = area.get("areaName", [{"value": ""}])[0].get("value", "")
-        city = str(name)
+        # prefer the city the user asked wttr.in for over the nearest sub-district
+        city = str(blob.get("city") or name or "")
         if pinned:
             return pinned[0], pinned[1], pinned[2] or city
         return float(lat), float(lon), city

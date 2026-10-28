@@ -294,6 +294,20 @@ def test_stale_quotes_are_labelled():
     assert "m前" not in panel.build(43, 30).plain
 
 
+def test_system_city_mapping():
+    from cyberdeck.geo import city_for_iana, city_for_windows_tz
+
+    assert city_for_windows_tz("China Standard Time") == "Shanghai"
+    assert city_for_windows_tz("Tokyo Standard Time") == "Tokyo"
+    assert city_for_windows_tz("Nowhere Standard Time") is None
+    assert city_for_windows_tz(None) is None
+    assert city_for_iana("Asia/Shanghai") == "Shanghai"
+    assert city_for_iana("America/Argentina/Buenos_Aires") == "Buenos Aires"
+    assert city_for_iana("Etc/GMT+8") is None
+    assert city_for_iana("UTC") is None
+    assert city_for_iana(None) is None
+
+
 def test_globe_marker():
     import math
 

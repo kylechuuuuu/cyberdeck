@@ -35,7 +35,7 @@ uv run cyberdeck
   如果 iTerm2 里条形图错位，关闭 Profiles → Text 里的 “Treat ambiguous-width characters as double width”。
 - **窗口**：建议 ≥ 110 列 × 30 行；≥ 210 列时右侧会出现信息栏。面板会随高度自动切换布局。
 
-固定城市（默认按出口 IP 自动定位）：
+指定城市（默认按**系统时区**推断，挂 VPN 也不会跑到 VPN 出口城市）：
 
 ```bash
 uv run cyberdeck --city Hangzhou
@@ -51,7 +51,7 @@ uv run cyberdeck
 
 或直接双击 / 运行 `.\run.ps1`。
 
-固定城市：
+固定城市（默认同上，按系统时区推断）：
 
 ```powershell
 uv run cyberdeck --city Hangzhou
@@ -116,8 +116,12 @@ NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.c
 
 坐标来源按优先级：
 
-1. `config.json` 里的 `location` —— 最准，常驻看板建议直接写死
-2. wttr.in 返回的最近气象站 —— 自动，但可能落在几十公里外的城市
+1. `config.json` 里的 `location` —— 精确坐标，常驻看板建议直接写死
+2. **系统时区**推断的城市（`China Standard Time` → Shanghai）→ wttr.in 该城市的气象站坐标
+
+**为什么不用 IP 定位**：开着 VPN 时出口 IP 在东京，IP 地理库就把城市判成东京，天气和地球红点会一起错。系统时区跟着机器走，不受代理影响，所以默认从时区推城市。
+
+> 旧版本可能已经把 `"city": "Tokyo"` 写进过 `config.json`，删掉那一行（或改成你自己的城市）再启动。
 
 ```json
 {

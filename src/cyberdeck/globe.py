@@ -375,7 +375,7 @@ class Globe(Widget):
         super().__init__(**kwargs)
         self.engine = GlobeEngine()
         self.yaw = -1.9
-        self.speed = 0.28
+        self.speed = 0.10
         self.paused = False
         self.marker: tuple[float, float, str] | None = None
         self._last = time.perf_counter()
@@ -383,7 +383,9 @@ class Globe(Widget):
 
     def on_mount(self) -> None:
         self.set_interval(1 / 24, self._tick)
-        self.set_interval(30, self._refresh_location)
+        # cheap (two small json reads): retry often so the pin appears as soon as
+        # the first weather fetch lands, instead of waiting for the next slow tick
+        self.set_interval(5.0, self._refresh_location)
         self._refresh_location()
 
     def _refresh_location(self) -> None:
@@ -415,10 +417,10 @@ class Globe(Widget):
         self.paused = not self.paused
 
     def action_faster(self) -> None:
-        self.speed = min(2.0, self.speed + 0.12)
+        self.speed = min(1.2, self.speed + 0.05)
 
     def action_slower(self) -> None:
-        self.speed = max(0.0, self.speed - 0.12)
+        self.speed = max(0.0, self.speed - 0.05)
 
     def render(self) -> Text:
         w, h = self.size.width, self.size.height
@@ -480,6 +482,7 @@ class Globe(Widget):
                                labels=labels)
         self._frame_ms = (time.perf_counter() - start) * 1000
         return result
+
 
 
 
