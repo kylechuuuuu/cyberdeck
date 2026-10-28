@@ -126,6 +126,7 @@ NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.c
 ```
 
 改完 30 秒内自动生效：地球每 30 秒重读一次定位。`location` 不会因为按 `t` 换主题被覆盖。
+`name` 同时会当作天气城市，所以只写这一处就够了（`--city` 仍然优先）。
 
 ## 常驻运行
 

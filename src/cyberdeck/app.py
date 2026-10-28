@@ -166,7 +166,9 @@ class CyberDeck(App):
         super().__init__()
         self.title = "CYBERDECK"
         self.config = storage.load_json("config.json") or {}
-        self.city = city or self.config.get("city") or None
+        pinned = self.config.get("location")
+        pinned_city = pinned.get("name") if isinstance(pinned, dict) else None
+        self.city = city or self.config.get("city") or pinned_city or None
         self.theme_index = theme.palette_index(self.config.get("theme"))
         theme.set_palette(self.theme_index)
 
