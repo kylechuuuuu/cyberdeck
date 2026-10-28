@@ -296,9 +296,23 @@ def location_marker() -> tuple[float, float, str] | None:
     return _location()
 
 
+_WEATHER_RAW: tuple[float, dict | None] = (-1.0, None)
+
+
 def _weather_raw() -> dict | None:
-    blob = storage.load_json("weather.json")
-    return blob.get("raw") if blob else None
+    """Cached wttr.in payload; re-read only when weather.json changes."""
+    global _WEATHER_RAW
+    path = storage.data_path("weather.json")
+    if path is None:
+        return None
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    if mtime != _WEATHER_RAW[0]:
+        blob = storage.load_json("weather.json")
+        _WEATHER_RAW = (mtime, blob.get("raw") if blob else None)
+    return _WEATHER_RAW[1]
 
 
 # --------------------------------------------------------------------------
@@ -643,6 +657,9 @@ class InfoPanel(Widget):
         self._hourly: list[tuple[str, int, int]] = []
         self._todo_mtime = 0.0
         self._notes_mtime = 0.0
+        self._raw_weather: dict | None = None
+        self._hourly_hour = -1
+        self._last_minute = -1
         self._cover_cache: tuple[int, list[Text]] | None = None
 
     def on_mount(self) -> None:
@@ -659,21 +676,35 @@ class InfoPanel(Widget):
 
     # -- data ------------------------------------------------------------
     def _tick(self) -> None:
+        changed = False
+        now = datetime.now()
         raw = _weather_raw()
-        if raw:
-            self._hourly = parse_hourly(raw, datetime.now(), 8)
+        if raw is not None and (raw is not self._raw_weather or now.hour != self._hourly_hour):
+            self._raw_weather = raw
+            self._hourly_hour = now.hour
+            hourly = parse_hourly(raw, now, 8)
+            if hourly != self._hourly:
+                self._hourly = hourly
+                changed = True
         if self.state.air is None and time.monotonic() - self._last_air > 30:
             self._last_air = time.monotonic()
             self._poll_air()
-        self._load_todo()
-        self.refresh()
+        if self._load_todo():
+            changed = True
+        # the column only needs a repaint when a clock digit / progress bar moves,
+        # or once a second while the music progress bar is running
+        playing = bool(self.state.media and self.state.media.playing)
+        if changed or playing or now.minute != self._last_minute:
+            self._last_minute = now.minute
+            self.refresh()
 
     def _todo_file(self) -> Path | None:
         if self.todo_path:
             return self.todo_path
         return storage.data_path("todo.txt")
 
-    def _load_todo(self) -> None:
+    def _load_todo(self) -> bool:
+        changed = False
         path = self._todo_file()
         mtime = 0.0
         if path is not None:
@@ -683,6 +714,7 @@ class InfoPanel(Widget):
                 mtime = 0.0
         if mtime != self._todo_mtime:
             self._todo_mtime = mtime
+            changed = True
             if path is None or not path.exists():
                 self.state.todo = []
             else:
@@ -700,6 +732,7 @@ class InfoPanel(Widget):
                 ntime = 0.0
         if ntime != self._notes_mtime:
             self._notes_mtime = ntime
+            changed = True
             if notes is None or not notes.exists():
                 self.state.notes = []
             else:
@@ -708,6 +741,7 @@ class InfoPanel(Widget):
                 except OSError:
                     text = ""
                 self.state.notes = [line.strip() for line in text.splitlines() if line.strip()][:12]
+        return changed
 
     def _notes_file(self) -> Path | None:
         if self.notes_path:

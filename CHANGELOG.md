@@ -25,3 +25,11 @@
 - `ruff` + `pytest`，GitHub Actions 三平台矩阵
 - 无头冒烟测试（`tools/smoke.py`）与截图生成（`tools/make_preview.py`）
 - 平台适配集中在共享模块内，不复制应用目录
+
+### 常驻看板
+
+- `--fps 1..30` 控制地球动画帧率，`--still` 启动即暂停
+- 暂停后地球完全停止重绘；信息栏只在分钟变化或数据变化时刷新
+- 天气缓存 / 待办文件按 mtime 读取，不再每秒解析 JSON
+- 实测（M5 / 160×44）：默认 8 fps ≈ 23% 单核，`--fps 5` ≈ 16%，`--still` ≈ 4%
+- README 增加 tmux、`caffeinate`、登录项常驻说明

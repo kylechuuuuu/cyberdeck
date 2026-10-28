@@ -162,11 +162,16 @@ class CyberDeck(App):
         Binding("8", "theme(7)", "主题8", show=False),
     ]
 
-    def __init__(self, city: str | None = None) -> None:
+    def __init__(self, city: str | None = None, fps: int | None = None, paused: bool = False) -> None:
         super().__init__()
         self.title = "CYBERDECK"
         self.config = storage.load_json("config.json") or {}
         self.city = city or self.config.get("city") or None
+        try:
+            self.fps = max(1, min(30, int(fps if fps is not None else self.config.get("fps", 8))))
+        except (TypeError, ValueError):
+            self.fps = 8
+        self.start_paused = paused
         self.theme_index = theme.palette_index(self.config.get("theme"))
         theme.set_palette(self.theme_index)
 
@@ -177,7 +182,7 @@ class CyberDeck(App):
                 with Horizontal(id="toprow"):
                     yield ClockPanel()
                     yield WeatherPanel(city=self.city)
-                yield Globe()
+                yield Globe(fps=self.fps, paused=self.start_paused)
             yield SystemPanel()
             yield InfoPanel(self.config)
         yield TooSmalMsg(id="toosmall")
@@ -224,6 +229,7 @@ class CyberDeck(App):
         for cls in (ClockPanel, WeatherPanel, SystemPanel, InfoPanel):
             for wdg in self.query(cls):
                 wdg.styles.background = theme.hexc(p.panel)
+        self.query_one(Globe).refresh()
         self.query_one("#left").styles.border_right = ("solid", theme.hexc(theme.mix(p.dim, p.bg, 0.35)))
         self.refresh()
 
@@ -295,10 +301,12 @@ class CyberDeck(App):
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cyberdeck", description="Terminal cyberdeck dashboard")
     parser.add_argument("--city", help="wttr.in location, e.g. Hangzhou (default: auto by IP)")
+    parser.add_argument("--fps", type=int, help="Earth animation FPS, 1-30 (default: 8, or config.json)")
+    parser.add_argument("--still", action="store_true", help="start with the Earth paused (low power)")
     parser.add_argument("--version", action="version", version=f"cyberdeck {__version__}")
     args = parser.parse_args()
     city = args.city or os.environ.get("CYBERDECK_CITY") or None
-    CyberDeck(city=city).run()
+    CyberDeck(city=city, fps=args.fps, paused=args.still).run()
 
 
 if __name__ == "__main__":

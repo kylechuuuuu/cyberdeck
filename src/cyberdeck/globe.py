@@ -259,25 +259,15 @@ class GlobeEngine:
 # widget
 # --------------------------------------------------------------------------
 
-_HEX: dict[int, str] = {}
 _STYLE: dict[int, Style] = {}
-
-
-def _hex(rgb: np.ndarray) -> str:
-    key = (int(rgb[0]) << 16) | (int(rgb[1]) << 8) | int(rgb[2])
-    s = _HEX.get(key)
-    if s is None:
-        if len(_HEX) > 20000:  # long-running dashboards can see thousands of shades
-            _HEX.clear()
-        s = f"#{key:06x}"
-        _HEX[key] = s
-    return s
 
 
 def _style(fg: int, bg: int) -> Style:
     key = (fg << 24) | bg
     st = _STYLE.get(key)
     if st is None:
+        if len(_STYLE) > 20000:  # long-running dashboards can see thousands of shades
+            _STYLE.clear()
         st = Style(color=Color.from_rgb((fg >> 16) & 255, (fg >> 8) & 255, fg & 255),
                    bgcolor=Color.from_rgb((bg >> 16) & 255, (bg >> 8) & 255, bg & 255))
         _STYLE[key] = st
@@ -345,18 +335,18 @@ class Globe(Widget):
     Globe { width: 1fr; height: 1fr; }
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, fps: int = 8, paused: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.engine = GlobeEngine()
         self.yaw = -1.9
         self.speed = 0.28
-        self.paused = False
+        self.fps = max(1, min(30, int(fps)))
+        self.paused = paused
         self.marker: tuple[float, float, str] | None = None
         self._last = time.perf_counter()
-        self._last_draw = 0.0
 
     def on_mount(self) -> None:
-        self.set_interval(1 / 24, self._tick)
+        self.set_interval(1 / self.fps, self._tick)
         self.set_interval(30, self._refresh_location)
         self._refresh_location()
 
@@ -367,22 +357,17 @@ class Globe(Widget):
             marker = location_marker()
         except Exception:
             marker = None
-        if marker:
+        if marker and marker != self.marker:
             self.marker = marker
+            self.refresh()
 
     def _tick(self) -> None:
         now = time.perf_counter()
-        # adaptive: aim for 12 fps, but back off to 8 fps when a frame is expensive
-        target = 1 / 10 if getattr(self, "_frame_ms", 0.0) < 13 else 1 / 7
-        if now - self._last_draw < target:
-            return
         dt = min(now - self._last, 0.25)
         self._last = now
-        if not self.paused:
-            self.yaw = (self.yaw + self.speed * dt) % (2 * math.pi)
-        elif now - self._last_draw < 0.25:
-            return  # paused: only keep the starfield twinkling, at 4 fps
-        self._last_draw = now
+        if self.paused:
+            return  # keep the last frame; no redraws while paused
+        self.yaw = (self.yaw + self.speed * dt) % (2 * math.pi)
         self.refresh()
 
     def action_toggle_spin(self) -> None:
@@ -398,7 +383,6 @@ class Globe(Widget):
         w, h = self.size.width, self.size.height
         if w < 12 or h < 6:
             return Text("地球需要更大的窗口", style=theme.hexc(theme.P.dim))
-        start = time.perf_counter()
         now = time.time()
         marker_ll = (self.marker[0], self.marker[1]) if self.marker else None
         img = self.engine.render(w, h, self.yaw, now, marker=marker_ll)
@@ -419,6 +403,5 @@ class Globe(Widget):
 
         result = image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"],
                                label=label, label_color=theme.P.red)
-        self._frame_ms = (time.perf_counter() - start) * 1000
         return result
 

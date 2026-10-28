@@ -464,3 +464,17 @@ def test_version_matches_pyproject():
     root = Path(__file__).resolve().parents[1]
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     assert data["project"]["version"] == __version__
+
+
+def test_globe_fps_and_pause():
+    from cyberdeck.app import CyberDeck
+    from cyberdeck.globe import Globe
+
+    assert Globe(fps=99).fps == 30
+    assert Globe(fps=0).fps == 1
+    assert CyberDeck(fps="bad").fps == 8  # type: ignore[arg-type]
+
+    globe = Globe(fps=8, paused=True)
+    yaw = globe.yaw
+    globe._tick()
+    assert globe.yaw == yaw

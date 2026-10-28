@@ -44,6 +44,33 @@ uv run cyberdeck --city Hangzhou
 CYBERDECK_CITY=Shanghai uv run cyberdeck
 ```
 
+常驻 / 低功耗：
+
+```bash
+uv run cyberdeck --fps 5      # 常驻推荐
+uv run cyberdeck --still      # 地球静止，CPU 最低（界面里也可按 space 暂停）
+```
+
+`--fps` 也可以写进 `config.json` 的 `"fps": 5`，下次启动自动生效。
+
+## 常驻看板
+
+macOS 下建议用 tmux 挂后台，关掉终端或 SSH 断开都不影响：
+
+```bash
+brew install tmux
+tmux new -d -s deck 'cd ~/Desktop/cyberdeck && ./run.sh --fps 5'
+tmux attach -t deck        # 随时切回；离开按 ctrl+b 再按 d
+```
+
+- `run.sh` 会把参数原样传给 `cyberdeck`。
+- 需要崩溃后自动重启：
+  `tmux new -d -s deck 'cd ~/Desktop/cyberdeck && while :; do ./run.sh --fps 5; [ $? -eq 0 ] && break; sleep 2; done'`
+  （正常按 `q` 退出是 0，不会重启；崩溃才会重来。）
+- 插电常亮：`caffeinate -dis ./run.sh --fps 5`；`-d` 会阻止显示器休眠，只想后台跑可改成 `-i`。
+- 开机自启：把 `run.command` 加到「系统设置 → 通用 → 登录项」，或在登录时用 launchd 创建上面的 tmux 会话。
+- 远程查看：SSH 进去 `tmux attach -t deck` 即可，不需要额外端口。
+
 ## Windows 运行
 
 ```powershell
@@ -96,7 +123,7 @@ sudo dnf install playerctl        # Fedora
 | --- | --- |
 | `q` / `ctrl+c` | 退出 |
 | `r` | 立即刷新天气 |
-| `space` | 暂停 / 继续地球自转 |
+| `space` | 暂停 / 继续地球自转（暂停后不再重绘，最省电） |
 | `+` / `-` | 加快 / 减慢自转（macOS 上 `+` 即 `shift` + `=`） |
 | `t` | 循环切换主题 |
 | `1` … `8` | 直接选择主题 |
@@ -177,13 +204,20 @@ sudo dnf install playerctl        # Fedora
 
 屏幕越大越吃资源，所以做了几层控制：
 
-- **地球**：目标 10 fps（单帧 > 13 ms 自动降到 7 fps，暂停后 4 fps 只保留星光闪烁）；颜色量化到 4 bit 并把连续同色像素合并，单帧 span 从 ~3400 降到 ~1800，Text 构建 9 ms → 3 ms；一帧总耗时约 10 ms。
+- **地球**：默认 8 fps（`--fps 1..30`），暂停后不再重绘；颜色量化到 4 bit 并把连续同色像素合并，单帧 span 从 ~3400 降到 ~1800，Text 构建 9 ms → 3 ms。
+- **按需重绘**：时钟 1 s；信息栏只在分钟变化、待办/笔记/行情/媒体变化时重绘；播放音乐时进度条才按 1 s 刷新；按 mtime 读取天气缓存与待办文件。
 - **采样分层**：CPU/内存 1 s，GPU/进程 4 s，ACPI 温度 60 s，行情 60 s，天气 15 min，AQI 10 min，媒体 10 s，延迟 5 s。
-- **按需 IO**：待办/笔记文件按 mtime 读取；配置只在改动时写。
 - **窄窗口**：右栏回落单列，只保留必要的区块；窗口小于 110×30 直接只显示提示。
 - **macOS**：GPU 走一次约 10 ms 的 `ioreg`，CPU 降频 / 内存压力每 8 秒读一次；不需要 sudo，也不跑常驻轮询。
 
-如果还想更省电，把 `globe.py` 里的 `target = 1 / 10` 改成 `1 / 6` 即可。
+在 Apple M5、160×44 窗口下实测（单核百分比，应用本身）：
+
+| 模式 | CPU | 说明 |
+| --- | --- | --- |
+| 默认 8 fps | ~23% | 动画顺滑 |
+| `--fps 5` | ~16% | 常驻推荐，仍有明显自转 |
+| `--fps 4` | ~13% | 更省电，轻微跳帧 |
+| `--still` | ~4% | 地球静止，适合纯看板 |
 
 ## 硬件数据来源
 
