@@ -34,8 +34,8 @@ class Palette:
 NEON = Palette(
     name="neon", label="赛博霓虹",
     cyan=(34, 211, 238), magenta=(244, 114, 182), purple=(168, 85, 247), blue=(56, 130, 246),
-    green=(52, 211, 153), amber=(251, 191, 36), red=(251, 113, 133), dim=(100, 116, 139),
-    text=(226, 232, 240), bg=(5, 8, 18), panel=(9, 14, 28),
+    green=(52, 211, 153), amber=(251, 191, 36), red=(251, 113, 133), dim=(124, 138, 160),
+    text=(234, 240, 248), bg=(6, 9, 18), panel=(11, 17, 32),
     ocean_deep=(6, 24, 62), ocean_shallow=(16, 96, 168), land=(34, 130, 92),
     desert=(168, 142, 92), ice=(214, 236, 255), atmo=(64, 214, 255),
 )
@@ -168,6 +168,35 @@ def sparkline(values: list[float], width: int) -> str:
     hi = max(vals) or 1.0
     s = "".join(chars[min(7, int(v / hi * 7.99))] for v in vals)
     return s.rjust(width, "▁")
+
+
+def heat(value: float) -> RGB:
+    """Colour ramp for a 0..1 load: cool at idle, hot at saturation."""
+    return ramp([P.cyan, P.blue, P.purple, P.magenta, P.red], value)
+
+
+def bar(value: float, width: int, filled: str = "█", empty: str = "░") -> tuple[str, str, RGB]:
+    """(filled text, empty text, colour) for a solid load bar."""
+    ratio = max(0.0, min(1.0, value))
+    n = min(width, max(0, round(ratio * width)))
+    return filled * n, empty * (width - n), heat(ratio)
+
+
+def graph_rows(values: list[float], width: int, height: int = 2) -> tuple[list[str], list[float]]:
+    """Rows of block characters for a tiny bar chart, plus normalised columns."""
+    vals = list(values)[-width:]
+    if not vals:
+        vals = [0.0]
+    hi = max(vals) or 1.0
+    cols = [min(1.0, v / hi) for v in vals]
+    cols += [0.0] * (width - len(cols))
+    levels = [max(1, int(round(c * height * 8))) for c in cols]
+    chars = " ▁▂▃▄▅▆▇█"
+    rows: list[str] = []
+    for r in range(height):
+        base = (height - 1 - r) * 8
+        rows.append("".join(chars[max(0, min(8, lv - base))] for lv in levels))
+    return rows, cols
 
 
 def fmt_bytes(n: float) -> str:

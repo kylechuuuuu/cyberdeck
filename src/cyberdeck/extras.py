@@ -19,6 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
+from rich.cells import cell_len
 from rich.text import Text
 from textual import work
 from textual.widget import Widget
@@ -153,6 +154,39 @@ def parse_symbols(text: str) -> list[str]:
         if symbol not in out:
             out.append(symbol)
     return out[:12]
+
+
+def trunc_cells(text: str, limit: int) -> str:
+    """Cut a string without splitting a wide (CJK) glyph."""
+    from rich.cells import cell_len
+
+    out: list[str] = []
+    used = 0
+    for ch in text:
+        width = cell_len(ch)
+        if used + width > limit:
+            break
+        out.append(ch)
+        used += width
+    return "".join(out)
+
+
+def window_cells(text: str, start: int, width: int) -> str:
+    """Substring covering `width` cells starting at cell offset `start`."""
+    from rich.cells import cell_len
+
+    out: list[str] = []
+    pos = used = 0
+    for ch in text:
+        w = cell_len(ch)
+        if pos + w <= start:
+            pos += w
+            continue
+        if pos >= start and used + w <= width:
+            out.append(ch)
+            used += w
+        pos += w
+    return "".join(out)
 
 
 def todo_lines(text: str, limit: int = 8) -> list[tuple[str, bool]]:
@@ -720,23 +754,30 @@ class InfoPanel(Widget):
         text_w = max(10, w - art_w - (3 if art_w else 0))
 
         title = m.title
-        if len(title) > text_w - 3 and playing:
-            padded = title + "   "
-            offset = int(time.monotonic() * 4) % len(padded)
-            title = (padded + padded)[offset:offset + text_w - 3]
+        avail = max(6, text_w - 3)
+        if cell_len(title) > avail:
+            if playing:
+                padded = title + "   "
+                period = max(1, cell_len(padded))
+                offset = int(time.monotonic() * 4) % period
+                title = window_cells(padded + padded, offset, avail)
+            else:
+                title = trunc_cells(title, avail)
+        else:
+            title = trunc_cells(title, avail)
 
         rows: list[Text] = []
         line = Text(no_wrap=True, end="")
         line.append(" ♪ ", c["mag"] if playing else c["dim"])
-        line.append(title[: text_w - 3], f"bold {c['text']}")
+        line.append(title, f"bold {c['text']}")
         rows.append(line)
         if m.artist:
             artist = Text(no_wrap=True, end="")
-            artist.append("   " + m.artist[: text_w - 3], c["dim"])
+            artist.append("   " + trunc_cells(m.artist, avail), c["dim"])
             rows.append(artist)
         if m.album and m.album != m.title:
             album = Text(no_wrap=True, end="")
-            album.append("   " + m.album[: text_w - 3], c["dim"])
+            album.append("   " + trunc_cells(m.album, avail), c["dim"])
             rows.append(album)
 
         pos = self._position(m)

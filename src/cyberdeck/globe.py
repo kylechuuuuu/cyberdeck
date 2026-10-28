@@ -156,19 +156,25 @@ class GlobeEngine:
 
     def _draw_marker(self, img: np.ndarray, mx: float, my: float, t: float) -> None:
         p = theme.P
-        radius = 2.4 + 0.9 * math.sin(t * 2.2)
-        span = 6
+        radius = 2.3 + 0.8 * math.sin(t * 2.2)
+        span = 7
         x0, x1 = max(0, int(mx) - span), min(img.shape[1], int(mx) + span + 1)
         y0, y1 = max(0, int(my) - span), min(img.shape[0], int(my) + span + 1)
         if x0 >= x1 or y0 >= y1:
             return
         ys, xs = np.mgrid[y0:y1, x0:x1]
         dist = np.hypot(xs - mx, ys - my)
-        ring = np.exp(-(((dist - radius) / 0.6) ** 2)) * 0.45
-        dot = np.exp(-((dist / 0.8) ** 2)) * 0.70
-        glow = np.exp(-((dist / 2.6) ** 2)) * 0.10
+        patch = img[y0:y1, x0:x1]
+        # darken a small disc first so the pin stays readable over bright land
+        shade = np.exp(-((dist / 2.7) ** 2)) * 0.55
+        patch *= (1 - shade[..., None])
+        ring = np.exp(-(((dist - radius) / 0.65) ** 2)) * 0.75
+        dot = np.exp(-((dist / 0.85) ** 2)) * 0.95
+        glow = np.exp(-((dist / 2.4) ** 2)) * 0.12
         weight = np.clip(ring + dot + glow, 0, 1)[..., None]
-        img[y0:y1, x0:x1] += weight * np.array(p.red, np.float32)
+        patch += weight * np.array(p.red, np.float32)
+        core = np.exp(-((dist / 0.45) ** 2))[..., None] * 0.35
+        patch += core * np.array((255, 235, 235), np.float32)
 
     def render(self, w: int, h: int, yaw: float, t: float, tilt: float = TILT,
                marker: tuple[float, float] | None = None) -> np.ndarray:
@@ -403,12 +409,11 @@ class Globe(Widget):
         pos = getattr(self.engine, "marker_pos", None)
         if pos is not None and self.marker:
             name = "".join(c for c in self.marker[2] if c.isascii() and c.isprintable())[:14] or "HERE"
-            text = f"◉ {name}"
-            cx, cy = int(pos[0]), int(pos[1] // 2) - 1
-            col = cx + 2
-            if col + len(text) >= w - 1:
-                col = max(0, cx - len(text) - 2)
-            label = (col, max(0, min(h - 3, cy)), text)
+            text = f"◉ {name} "
+            cx, cy = int(pos[0]), int(pos[1] // 2)
+            col = cx + 2 if cx + len(text) + 2 < w else max(0, cx - len(text) - 2)
+            row = cy - 1 if cy > 1 else cy + 1
+            label = (col, max(0, min(h - 3, row)), text)
 
         result = image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"],
                                label=label, label_color=theme.P.red)

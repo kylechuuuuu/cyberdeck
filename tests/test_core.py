@@ -315,4 +315,31 @@ def test_media_section():
     assert "未在播放" in panel.build(43, 30).plain
 
 
+def test_long_music_titles_stay_inside_column():
+    from rich.cells import cell_len
+
+    from cyberdeck.extras import Media, trunc_cells, window_cells
+
+    assert trunc_cells("就算我错漏百出", 6) == "就算我"
+    assert cell_len(window_cells("abc就算def", 2, 6)) <= 6
+
+    panel = InfoPanel({"info": {"modules": ["media"], "zones": ["UTC"]}})
+    long_ascii = Media("A Very Long Song Title That Definitely Overflows The Column", "Artist", True, 10, 200)
+    long_cjk = Media("就算我错漏百出就算我错漏百出就算我错漏百出", "歌手名字也很长很长", True, 10, 200)
+    for media in (long_ascii, long_cjk):
+        panel.state.media = media
+        for line in panel._sec_media(43):
+            assert cell_len(line.plain) <= 43, line.plain
+
+
+def test_heat_and_bars():
+    assert theme.heat(0.0) == theme.heat(0.0)
+    assert theme.heat(1.0) != theme.heat(0.0)
+    filled, empty, color = theme.bar(0.5, 10)
+    assert len(filled) == 5 and len(empty) == 5
+    rows, cols = theme.graph_rows([1, 2, 3, 4], 6, 2)
+    assert len(rows) == 2 and all(len(r) == 6 for r in rows)
+    assert len(cols) == 6
+
+
 

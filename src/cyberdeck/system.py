@@ -563,14 +563,30 @@ class SystemPanel(Widget):
             line.append("  " + extra, c["dim"])
         return line
 
-    def _bar(self, value: float, width: int, stops, suffix: str = "", style: str | None = None) -> Text:
-        c = self._style()
+    def _bar(self, value: float, width: int, suffix: str = "") -> Text:
+        filled, empty, color = theme.bar(value, max(4, width))
         line = Text(no_wrap=True, end="")
-        for ch, color in theme.gauge(value, max(4, width), stops):
-            line.append(ch, color)
+        line.append(filled, theme.hexc(color))
+        line.append(empty, theme.hexc(theme.mix(theme.P.dim, theme.P.panel, 0.55)))
         if suffix:
-            line.append(" " + suffix, style or c["text"])
+            line.append(" " + suffix, f"bold {theme.hexc(color)}")
         return line
+
+    def _track(self) -> str:
+        return theme.hexc(theme.mix(theme.P.dim, theme.P.panel, 0.55))
+
+    def _graph(self, values, width: int, height: int = 2, label: str = "60s") -> list[Text]:
+        rows, cols = theme.graph_rows(values, width, height)
+        out: list[Text] = []
+        for r, chars in enumerate(rows):
+            line = Text(no_wrap=True, end="")
+            line.append(" ", "")
+            for i, ch in enumerate(chars):
+                line.append(ch, theme.hexc(theme.heat(cols[i])))
+            if r == len(rows) - 1 and label:
+                line.append(" " + label, self._style()["dim"])
+            out.append(line)
+        return out
 
     def _sec_cpu(self, w: int, compact: bool = False) -> list[Text]:
         c = self._style()
@@ -583,25 +599,23 @@ class SystemPanel(Widget):
             spec += f" · {s.freq:.2f}GHz"
         lines.append(Text(" " + spec, style=c["dim"]))
         bar_w = max(6, w - 9)
-        lines.append(self._bar(s.cpu / 100, bar_w, [theme.P.cyan, theme.P.purple, theme.P.magenta],
-                               f"{s.cpu:4.1f}%"))
+        lines.append(self._bar(s.cpu / 100, bar_w, f"{s.cpu:4.1f}%"))
         if not compact:
-            spark = Text(" ", no_wrap=True)
-            spark.append(theme.sparkline(list(self.sampler.cpu_hist), bar_w), c["cyan"])
-            spark.append(" 60s", c["dim"])
-            lines.append(spark)
+            lines += self._graph(list(self.sampler.cpu_hist), bar_w)
 
         n = len(s.per_core)
         if n:
             cols = (8 if w >= 46 else 4) if compact else (2 if w < 50 else 4)
             cell_w = max(2, (w - 1) // cols - 3)
+            track = self._track()
             for start in range(0, n, cols):
                 row = Text(no_wrap=True, end="")
                 for i in range(start, min(start + cols, n)):
-                    row.append(f"{i:>2}", theme.hexc(theme.mix(theme.P.dim, theme.P.panel, 0.1)))
-                    for ch, color in theme.gauge(s.per_core[i] / 100, cell_w,
-                                                 [theme.P.cyan, theme.P.purple, theme.P.magenta]):
-                        row.append(ch, color)
+                    value = s.per_core[i] / 100
+                    filled, empty, color = theme.bar(value, cell_w)
+                    row.append(f"{i:>2}", theme.hexc(theme.mix(theme.P.dim, theme.P.panel, 0.05)))
+                    row.append(filled, theme.hexc(color))
+                    row.append(empty, track)
                     row.append(" ")
                 lines.append(row)
         return lines
@@ -612,14 +626,15 @@ class SystemPanel(Widget):
         lines = [self._header("MEM", w)]
         value = Text(no_wrap=True, end="")
         value.append(f"{theme.fmt_bytes(s.mem_used)} / {theme.fmt_bytes(s.mem_total)}", c["text"])
-        value.append(f"  {s.mem_pct:.0f}%", f"bold {c['mag']}")
+        value.append(f"  {s.mem_pct:.0f}%", f"bold {theme.hexc(theme.heat(s.mem_pct / 100))}")
         lines.append(value)
-        lines.append(self._bar(s.mem_pct / 100, max(6, w - 2), [theme.P.cyan, theme.P.blue, theme.P.magenta]))
+        lines.append(self._bar(s.mem_pct / 100, max(6, w - 2)))
         swap_pct = s.swap_used / s.swap_total if s.swap_total else 0.0
         sw = Text(no_wrap=True, end="")
         sw.append("SWAP ", c["dim"])
-        for ch, color in theme.gauge(swap_pct, max(4, w - 22), [theme.P.purple, theme.P.magenta]):
-            sw.append(ch, color)
+        filled, empty, color = theme.bar(swap_pct, max(4, w - 22))
+        sw.append(filled, theme.hexc(color))
+        sw.append(empty, self._track())
         sw.append(f" {theme.fmt_bytes(s.swap_used)}/{theme.fmt_bytes(s.swap_total)}", c["dim"])
         lines.append(sw)
         return lines
@@ -634,42 +649,37 @@ class SystemPanel(Widget):
             lines.append(Text(text, style=c["dim"]))
             return lines
         info = Text(no_wrap=True, end="")
-        info.append(f" {g.util:3.0f}%", f"bold {c['mag']}")
-        info.append(f"  {g.mem_used / 1024:.1f}/{g.mem_total / 1024:.1f}G", c["dim"])
+        info.append(f" {g.util:3.0f}%", f"bold {theme.hexc(theme.heat(g.util / 100))}")
+        info.append(f"  {g.mem_used / 1024:.1f}/{g.mem_total / 1024:.1f}G", c["text"])
         info.append(f"  {g.temp:.0f}°C", c["amb"])
         if g.fan is not None:
             info.append(f"  {g.fan:.0f}rpm", c["dim"])
         if compact:
             lines.append(Text(" " + short(g.name, max(6, w - 2)), style=c["text"]))
             lines.append(info)
-            lines.append(self._bar(g.util / 100, max(6, w - 2),
-                                   [theme.P.magenta, theme.P.red, theme.P.amber]))
+            lines.append(self._bar(g.util / 100, max(6, w - 2)))
             return lines
         lines.append(Text(" " + short(g.name, w - 2), style=c["text"]))
         lines.append(info)
-        lines.append(self._bar(g.util / 100, max(6, w - 2),
-                               [theme.P.magenta, theme.P.red, theme.P.amber]))
+        lines.append(self._bar(g.util / 100, max(6, w - 2)))
+        lines += self._graph(list(self.sampler.gpu_hist), max(6, w - 2))
+
+        ratio = g.mem_used / g.mem_total if g.mem_total else 0.0
         vram = Text(no_wrap=True, end="")
         vram.append("VRAM ", c["dim"])
-        ratio = g.mem_used / g.mem_total if g.mem_total else 0.0
-        for ch, color in theme.gauge(ratio, max(4, w - 20), [theme.P.purple, theme.P.cyan]):
-            vram.append(ch, color)
+        filled, empty, color = theme.bar(ratio, max(4, w - 20))
+        vram.append(filled, theme.hexc(color))
+        vram.append(empty, self._track())
         vram.append(f" {g.power:.0f}W", c["dim"])
         if g.power_limit:
             vram.append(f"/{g.power_limit:.0f}W", c["dim"])
         lines.append(vram)
+
         clocks = Text(no_wrap=True, end="")
         clocks.append(f" GFX {g.clock_gfx:.0f}MHz  MEM {g.clock_mem:.0f}MHz", c["dim"])
-        lines.append(clocks)
         if g.enc or g.dec:
-            codec = Text(no_wrap=True, end="")
-            codec.append(f" ENC {g.enc:.0f}%  DEC {g.dec:.0f}%", c["dim"])
-            lines.append(codec)
-        if len(self.sampler.gpu_hist) > 2:
-            spark = Text(no_wrap=True, end="")
-            spark.append(" " + theme.sparkline(list(self.sampler.gpu_hist), max(4, w - 6)), c["mag"])
-            spark.append(" 60s", c["dim"])
-            lines.append(spark)
+            clocks.append(f"  ENC {g.enc:.0f}% DEC {g.dec:.0f}%", c["dim"])
+        lines.append(clocks)
         return lines
 
     def _sec_net(self, w: int) -> list[Text]:
@@ -678,14 +688,11 @@ class SystemPanel(Widget):
         lines = [self._header("NET", w)]
         rate = Text(no_wrap=True, end="")
         rate.append(" ↓ ", c["cyan"])
-        rate.append(theme.fmt_rate(s.down), c["text"])
-        rate.append("  ↑ ", c["mag"])
-        rate.append(theme.fmt_rate(s.up), c["text"])
+        rate.append(theme.fmt_rate(s.down), f"bold {c['cyan']}")
+        rate.append("   ↑ ", c["mag"])
+        rate.append(theme.fmt_rate(s.up), f"bold {c['mag']}")
         lines.append(rate)
-        spark = Text(no_wrap=True, end="")
-        spark.append(" " + theme.sparkline(list(self.sampler.net_hist), max(4, w - 6)), c["pur"])
-        spark.append(" 60s", c["dim"])
-        lines.append(spark)
+        lines += self._graph(list(self.sampler.net_hist), max(6, w - 8), 2, "60s")
         for nic in s.nics[:2]:
             row = Text(no_wrap=True, end="")
             row.append(" " + short(nic.name, 10), c["text"])
@@ -703,8 +710,9 @@ class SystemPanel(Widget):
             pct = d.used / d.total if d.total else 0.0
             row = Text(no_wrap=True, end="")
             row.append(f"{d.mount:<4}", c["dim"])
-            for ch, color in theme.gauge(pct, max(4, w - 20), [theme.P.cyan, theme.P.purple, theme.P.magenta]):
-                row.append(ch, color)
+            filled, empty, color = theme.bar(pct, max(4, w - 20))
+            row.append(filled, theme.hexc(color))
+            row.append(empty, self._track())
             row.append(f" {theme.fmt_bytes(d.total - d.used)} free", c["dim"])
             lines.append(row)
         for io in s.disk_ios[:2]:
@@ -799,5 +807,6 @@ class SystemPanel(Widget):
             status.append(" ↑↓ 选择 · S 排序 · K 结束", c["dim"])
         lines.append(status)
         return lines
+
 
 
