@@ -1,5 +1,5 @@
 #Requires -Version 7
-# Build the Windows release artifact: dist\cyberdeck-<version>-win64.zip
+# Build the Windows release artifact: dist\cyberdeck-<version>-windows-x64.zip
 #   pwsh -File packaging\build_windows.ps1
 param(
     [switch]$SkipInstall
@@ -62,10 +62,15 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item "dist\cyberdeck.exe" $stage
 Set-Content -Path (Join-Path $stage "README.txt") -Value $readme -Encoding utf8
 
-$zip = "dist\cyberdeck-$version-win64.zip"
+$zip = "dist\cyberdeck-$version-windows-x64.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
 Remove-Item $stage -Recurse -Force
 
+$hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+$name = Split-Path $zip -Leaf
+Set-Content -Path "$zip.sha256" -Value "$name  $hash" -Encoding utf8
+
 $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
-Write-Host "wrote $zip ($size MB)" -ForegroundColor Green
+Write-Host "wrote $zip ($size MB)"
+Write-Host "sha256 $hash"
