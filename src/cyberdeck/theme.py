@@ -10,6 +10,7 @@ RGB = tuple[int, int, int]
 @dataclass(frozen=True)
 class Palette:
     name: str
+    label: str
     cyan: RGB
     magenta: RGB
     purple: RGB
@@ -31,69 +32,78 @@ class Palette:
 
 
 NEON = Palette(
-    name="neon",
-    cyan=(34, 211, 238),
-    magenta=(244, 114, 182),
-    purple=(168, 85, 247),
-    blue=(56, 130, 246),
-    green=(52, 211, 153),
-    amber=(251, 191, 36),
-    red=(251, 113, 133),
-    dim=(100, 116, 139),
-    text=(226, 232, 240),
-    bg=(5, 8, 18),
-    panel=(9, 14, 28),
-    ocean_deep=(6, 24, 62),
-    ocean_shallow=(16, 96, 168),
-    land=(34, 130, 92),
-    desert=(168, 142, 92),
-    ice=(214, 236, 255),
-    atmo=(64, 214, 255),
+    name="neon", label="赛博霓虹",
+    cyan=(34, 211, 238), magenta=(244, 114, 182), purple=(168, 85, 247), blue=(56, 130, 246),
+    green=(52, 211, 153), amber=(251, 191, 36), red=(251, 113, 133), dim=(100, 116, 139),
+    text=(226, 232, 240), bg=(5, 8, 18), panel=(9, 14, 28),
+    ocean_deep=(6, 24, 62), ocean_shallow=(16, 96, 168), land=(34, 130, 92),
+    desert=(168, 142, 92), ice=(214, 236, 255), atmo=(64, 214, 255),
 )
 
 BTOP = Palette(
-    name="btop",
-    cyan=(56, 189, 248),
-    magenta=(74, 222, 128),
-    purple=(96, 165, 250),
-    blue=(59, 130, 246),
-    green=(74, 222, 128),
-    amber=(251, 191, 36),
-    red=(248, 113, 113),
-    dim=(100, 116, 139),
-    text=(226, 232, 240),
-    bg=(6, 10, 14),
-    panel=(10, 16, 22),
-    ocean_deep=(8, 32, 48),
-    ocean_shallow=(22, 110, 140),
-    land=(52, 168, 110),
-    desert=(170, 150, 100),
-    ice=(220, 240, 250),
-    atmo=(80, 200, 240),
+    name="btop", label="BTOP 绿",
+    cyan=(56, 189, 248), magenta=(74, 222, 128), purple=(96, 165, 250), blue=(59, 130, 246),
+    green=(74, 222, 128), amber=(251, 191, 36), red=(248, 113, 113), dim=(100, 116, 139),
+    text=(226, 232, 240), bg=(6, 10, 14), panel=(10, 16, 22),
+    ocean_deep=(8, 32, 48), ocean_shallow=(22, 110, 140), land=(52, 168, 110),
+    desert=(170, 150, 100), ice=(220, 240, 250), atmo=(80, 200, 240),
 )
 
 AMBER = Palette(
-    name="amber",
-    cyan=(251, 191, 36),
-    magenta=(245, 158, 11),
-    purple=(217, 119, 6),
-    blue=(180, 83, 9),
-    green=(234, 179, 8),
-    amber=(253, 224, 71),
-    red=(239, 68, 68),
-    dim=(120, 96, 56),
-    text=(253, 230, 138),
-    bg=(8, 6, 3),
-    panel=(18, 12, 6),
-    ocean_deep=(30, 18, 4),
-    ocean_shallow=(140, 88, 20),
-    land=(214, 158, 46),
-    desert=(240, 200, 120),
-    ice=(255, 250, 220),
-    atmo=(255, 190, 60),
+    name="amber", label="琥珀 CRT",
+    cyan=(251, 191, 36), magenta=(245, 158, 11), purple=(217, 119, 6), blue=(180, 83, 9),
+    green=(234, 179, 8), amber=(253, 224, 71), red=(239, 68, 68), dim=(120, 96, 56),
+    text=(253, 230, 138), bg=(8, 6, 3), panel=(18, 12, 6),
+    ocean_deep=(30, 18, 4), ocean_shallow=(140, 88, 20), land=(214, 158, 46),
+    desert=(240, 200, 120), ice=(255, 250, 220), atmo=(255, 190, 60),
 )
 
-PALETTES = [NEON, BTOP, AMBER]
+MATRIX = Palette(
+    name="matrix", label="矩阵绿",
+    cyan=(0, 255, 130), magenta=(120, 255, 90), purple=(60, 220, 150), blue=(0, 190, 120),
+    green=(140, 255, 150), amber=(190, 255, 110), red=(255, 90, 90), dim=(58, 110, 78),
+    text=(198, 255, 214), bg=(2, 9, 5), panel=(6, 18, 11),
+    ocean_deep=(3, 26, 15), ocean_shallow=(20, 96, 55), land=(34, 128, 62),
+    desert=(126, 158, 74), ice=(206, 255, 214), atmo=(60, 255, 150),
+)
+
+NORD = Palette(
+    name="nord", label="Nord",
+    cyan=(136, 192, 208), magenta=(191, 97, 106), purple=(180, 142, 173), blue=(129, 161, 193),
+    green=(163, 190, 140), amber=(235, 203, 139), red=(191, 97, 106), dim=(110, 120, 140),
+    text=(236, 239, 244), bg=(32, 37, 47), panel=(42, 48, 60),
+    ocean_deep=(36, 52, 70), ocean_shallow=(76, 118, 148), land=(122, 152, 122),
+    desert=(190, 170, 126), ice=(232, 241, 250), atmo=(136, 192, 208),
+)
+
+GRUVBOX = Palette(
+    name="gruvbox", label="Gruvbox",
+    cyan=(142, 192, 124), magenta=(211, 134, 155), purple=(177, 98, 134), blue=(131, 165, 152),
+    green=(184, 187, 38), amber=(250, 189, 47), red=(251, 73, 52), dim=(146, 131, 116),
+    text=(235, 219, 178), bg=(29, 32, 33), panel=(40, 40, 40),
+    ocean_deep=(30, 40, 44), ocean_shallow=(74, 104, 96), land=(120, 142, 86),
+    desert=(200, 170, 100), ice=(240, 235, 210), atmo=(131, 165, 152),
+)
+
+TOKYO = Palette(
+    name="tokyo", label="Tokyo Night",
+    cyan=(125, 207, 255), magenta=(187, 154, 247), purple=(157, 124, 216), blue=(122, 162, 247),
+    green=(158, 206, 106), amber=(224, 175, 104), red=(247, 118, 142), dim=(94, 106, 148),
+    text=(192, 202, 245), bg=(26, 27, 38), panel=(36, 40, 59),
+    ocean_deep=(22, 32, 62), ocean_shallow=(56, 100, 168), land=(88, 142, 118),
+    desert=(190, 160, 112), ice=(222, 236, 255), atmo=(125, 207, 255),
+)
+
+SYNTH = Palette(
+    name="synthwave", label="Synthwave",
+    cyan=(0, 240, 255), magenta=(255, 60, 180), purple=(160, 80, 255), blue=(90, 120, 255),
+    green=(0, 255, 190), amber=(255, 180, 60), red=(255, 70, 110), dim=(108, 88, 148),
+    text=(240, 225, 255), bg=(14, 8, 26), panel=(26, 14, 44),
+    ocean_deep=(20, 10, 54), ocean_shallow=(74, 40, 150), land=(146, 62, 190),
+    desert=(255, 140, 190), ice=(255, 232, 255), atmo=(255, 60, 180),
+)
+
+PALETTES = [NEON, BTOP, AMBER, MATRIX, NORD, GRUVBOX, TOKYO, SYNTH]
 P = NEON
 
 
@@ -101,6 +111,13 @@ def set_palette(index: int) -> Palette:
     global P
     P = PALETTES[index % len(PALETTES)]
     return P
+
+
+def palette_index(name: str | None) -> int:
+    for i, palette in enumerate(PALETTES):
+        if palette.name == name:
+            return i
+    return 0
 
 
 def hexc(c: RGB) -> str:
@@ -126,10 +143,6 @@ def ramp(stops: list[RGB], t: float) -> RGB:
     return mix(stops[i], stops[i + 1], pos - i)
 
 
-def blend_bg(fg: RGB, bg: RGB, alpha: float) -> RGB:
-    return mix(bg, fg, alpha)
-
-
 # --- text helpers -----------------------------------------------------------
 
 def gauge(value: float, width: int, stops: list[RGB] | None = None,
@@ -137,7 +150,7 @@ def gauge(value: float, width: int, stops: list[RGB] | None = None,
     """Return (char, style) cells for a horizontal bar."""
     stops = stops or [P.cyan, P.purple, P.magenta]
     width = max(1, width)
-    n = int(round(max(0.0, min(1.0, value)) * width))
+    n = round(max(0.0, min(1.0, value)) * width)
     out: list[tuple[str, str]] = []
     for i in range(width):
         if i < n:

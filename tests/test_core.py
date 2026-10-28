@@ -162,3 +162,53 @@ def test_system_panel_builds():
     panel.build(30, 20)
 
 
+def test_palettes_are_complete():
+    fields = ("cyan", "magenta", "purple", "blue", "green", "amber", "red", "dim", "text", "bg",
+              "panel", "ocean_deep", "ocean_shallow", "land", "desert", "ice", "atmo")
+    assert len(theme.PALETTES) == 8
+    assert len({p.name for p in theme.PALETTES}) == 8
+    for palette in theme.PALETTES:
+        assert palette.label
+        for field in fields:
+            rgb = getattr(palette, field)
+            assert len(rgb) == 3
+            assert all(isinstance(c, int) and 0 <= c <= 255 for c in rgb)
+    assert theme.palette_index("nord") == 4
+    assert theme.palette_index("does-not-exist") == 0
+
+
+def test_storage_roundtrip():
+    from cyberdeck import storage
+
+    assert storage.data_path("test-config.json") is not None
+    assert storage.save_json("test-config.json", {"theme": "neon", "n": 1})
+    assert storage.load_json("test-config.json") == {"theme": "neon", "n": 1}
+    storage.data_path("test-config.json").unlink(missing_ok=True)
+
+
+def test_process_table_sorting_and_layout():
+    from cyberdeck.system import Proc
+
+    sampler = Sampler()
+    sampler.state.procs = [
+        Proc("alpha", 10, 5.0, 100),
+        Proc("bravo", 20, 1.0, 300),
+        Proc("charlie", 30, 3.0, 200),
+    ]
+    panel = SystemPanel(sampler)
+    panel.sort_key = "cpu"
+    assert [p.name for p in panel._sorted_procs()] == ["alpha", "charlie", "bravo"]
+    panel.sort_key = "mem"
+    assert [p.name for p in panel._sorted_procs()] == ["bravo", "charlie", "alpha"]
+    panel.sort_key = "pid"
+    assert [p.pid for p in panel._sorted_procs()] == [10, 20, 30]
+    panel.sort_key = "name"
+    assert [p.name for p in panel._sorted_procs()] == ["alpha", "bravo", "charlie"]
+
+    wide = panel.build(85, 42).plain
+    assert "PROC" in wide and "│" in wide and "CPU" in wide and "GPU" in wide
+    narrow = panel.build(63, 32).plain
+    assert "PROC" in narrow and "MEM" in narrow
+    assert all(theme_width(line) <= 86 for line in wide.split("\n"))
+
+

@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 
-from . import theme
+from . import storage, theme
 from .clock import ClockPanel
 from .globe import Globe
 from .system import SystemPanel
@@ -62,15 +62,21 @@ def hintbar_text() -> Text:
     t = Text(no_wrap=True, end="")
     hints = [
         ("Q", "退出"),
-        ("R", "刷新天气"),
-        ("SPACE", "暂停自转"),
+        ("R", "天气"),
+        ("SPACE", "自转"),
         ("+/-", "转速"),
-        ("T", "配色"),
+        ("↑↓", "进程"),
+        ("S", "排序"),
+        ("K", "结束"),
+        ("T", "主题"),
     ]
     t.append(" ")
     for key, label in hints:
         t.append(f" {key} ", f"bold {theme.hexc(p.bg)} on {theme.hexc(p.cyan)}")
         t.append(f" {label}  ", theme.hexc(p.dim))
+    t.append("· ", theme.hexc(p.dim))
+    t.append(p.label, f"bold {theme.hexc(p.magenta)}")
+    t.append(" ", "")
     return t
 
 
@@ -113,12 +119,22 @@ class CyberDeck(App):
         Binding("plus,equal", "faster", "加速"),
         Binding("minus", "slower", "减速"),
         Binding("t", "cycle_theme", "配色"),
+        Binding("1", "theme(0)", "主题1", show=False),
+        Binding("2", "theme(1)", "主题2", show=False),
+        Binding("3", "theme(2)", "主题3", show=False),
+        Binding("4", "theme(3)", "主题4", show=False),
+        Binding("5", "theme(4)", "主题5", show=False),
+        Binding("6", "theme(5)", "主题6", show=False),
+        Binding("7", "theme(6)", "主题7", show=False),
+        Binding("8", "theme(7)", "主题8", show=False),
     ]
 
     def __init__(self, city: str | None = None) -> None:
         super().__init__()
-        self.city = city
-        self.theme_index = 0
+        self.config = storage.load_json("config.json") or {}
+        self.city = city or self.config.get("city") or None
+        self.theme_index = theme.palette_index(self.config.get("theme"))
+        theme.set_palette(self.theme_index)
 
     def compose(self) -> ComposeResult:
         yield TopBar()
@@ -135,6 +151,7 @@ class CyberDeck(App):
     def on_mount(self) -> None:
         self._apply_theme()
         self._sync_size(self.size)
+        self.query_one(SystemPanel).focus()
 
     def on_resize(self, event) -> None:
         self._sync_size(event.size)
@@ -157,6 +174,10 @@ class CyberDeck(App):
         self.query_one("#left").styles.border_right = ("solid", theme.hexc(theme.mix(p.dim, p.bg, 0.35)))
         self.refresh()
 
+    def _save_config(self) -> None:
+        self.config.update({"theme": theme.P.name, "city": self.city})
+        storage.save_json("config.json", self.config)
+
     def action_refresh_weather(self) -> None:
         self.query_one(WeatherPanel).refresh_weather()
 
@@ -170,9 +191,14 @@ class CyberDeck(App):
         self.query_one(Globe).action_slower()
 
     def action_cycle_theme(self) -> None:
-        self.theme_index = (self.theme_index + 1) % len(theme.PALETTES)
+        self.action_theme((self.theme_index + 1) % len(theme.PALETTES))
+
+    def action_theme(self, index: int) -> None:
+        self.theme_index = int(index) % len(theme.PALETTES)
         theme.set_palette(self.theme_index)
         self._apply_theme()
+        self._save_config()
+        self.query_one(HintBar).refresh()
 
 
 def main() -> None:

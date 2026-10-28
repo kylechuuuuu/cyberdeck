@@ -4,47 +4,17 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 from rich.text import Text
 from textual import work
 from textual.widget import Widget
 
-from . import theme
-
-CACHE_CANDIDATES = [
-    Path(os.environ["LOCALAPPDATA"]) / "cyberdeck" / "weather.json" if os.environ.get("LOCALAPPDATA") else None,
-    Path.home() / ".cache" / "cyberdeck" / "weather.json",
-    Path(os.environ.get("TEMP", ".")) / "cyberdeck-weather.json",
-    Path.cwd() / ".cyberdeck" / "weather.json",
-]
-CACHE: Path | None = None
-_cache_ready = False
-
-
-def cache_path() -> Path | None:
-    """First writable cache location (LOCALAPPDATA is sometimes locked down)."""
-    global CACHE, _cache_ready
-    if _cache_ready:
-        return CACHE
-    _cache_ready = True
-    for candidate in CACHE_CANDIDATES:
-        if candidate is None:
-            continue
-        try:
-            candidate.parent.mkdir(parents=True, exist_ok=True)
-            CACHE = candidate
-            break
-        except OSError:
-            continue
-    return CACHE
-
+from . import storage, theme
 
 FRESH_FOR = 15 * 60
 
@@ -198,13 +168,12 @@ def _parse(raw: dict, fetched: float, stale: bool = False) -> Weather:
 
 
 def load_cache() -> Weather | None:
-    path = cache_path()
-    if path is None:
+    blob = storage.load_json("weather.json")
+    if not blob:
         return None
     try:
-        blob = json.loads(path.read_text(encoding="utf-8"))
         return _parse(blob["raw"], blob["ts"], stale=True)
-    except Exception:
+    except (KeyError, IndexError, TypeError, ValueError):
         return None
 
 
@@ -217,14 +186,11 @@ def fetch_weather(city: str | None = None) -> Weather | None:
         with urllib.request.urlopen(req, timeout=9) as resp:
             raw = json.loads(resp.read().decode("utf-8", "replace"))
         ts = time.time()
-        path = cache_path()
-        if path is not None:
-            with contextlib.suppress(OSError):
-                path.write_text(json.dumps({"ts": ts, "city": city, "raw": raw}), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            storage.save_json("weather.json", {"ts": ts, "city": city, "raw": raw})
         return _parse(raw, ts)
     except Exception:
-        cached = load_cache()
-        return cached
+        return load_cache()
 
 
 # --------------------------------------------------------------------------
