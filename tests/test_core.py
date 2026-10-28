@@ -295,10 +295,24 @@ def test_globe_marker():
 def test_parse_symbols():
     from cyberdeck.extras import parse_symbols
 
-    assert parse_symbols("sh600519, us.AAPL") == ["sh600519", "us.AAPL"]
-    assert parse_symbols("sh600519，sz399001、us.AAPL") == ["sh600519", "sz399001", "us.AAPL"]
+    assert parse_symbols("sh600519, us.AAPL") == ["sh600519", "usAAPL"]
+    assert parse_symbols("sh600519，sz399001、us.NVDA") == ["sh600519", "sz399001", "usNVDA"]
     assert parse_symbols("  sh600519  sh600519 ") == ["sh600519"]
+    assert parse_symbols("us.aapl, hk.700") == ["usAAPL", "hk700"]
     assert parse_symbols("") == []
+
+
+def test_media_section():
+    from cyberdeck.extras import Media
+
+    panel = InfoPanel({"info": {"modules": ["media"], "zones": ["UTC"]}})
+    panel.state.media = Media("Forever Yours", "J. Brown", True, 12.0, 227.0)
+    text = panel.build(43, 30).plain
+    assert "音乐" in text and "Forever Yours" in text and "J. Brown" in text
+    assert "0:12/3:47" in text
+    # stopped playback still renders without progress
+    panel.state.media = Media("", "", False)
+    assert "未在播放" in panel.build(43, 30).plain
 
 
 

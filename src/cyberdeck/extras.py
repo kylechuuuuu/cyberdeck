@@ -139,12 +139,17 @@ def parse_stocks(text: str) -> list[tuple[str, str, float]]:
 
 
 def parse_symbols(text: str) -> list[str]:
-    """Split 'sh600519, us.AAPL' (commas, Chinese commas, spaces) into symbols."""
+    """Split 'sh600519, us.AAPL' into Tencent-style symbols (us./hk. dots removed)."""
     cleaned = text.replace("，", ",").replace("、", ",").replace(";", ",").replace(" ", ",")
     out: list[str] = []
     for part in cleaned.split(","):
         symbol = part.strip()
-        if symbol and symbol not in out:
+        if not symbol:
+            continue
+        prefix, dot, ticker = symbol.partition(".")
+        if dot and prefix.lower() in ("us", "hk"):
+            symbol = prefix.lower() + ticker.upper()
+        if symbol not in out:
             out.append(symbol)
     return out[:12]
 
@@ -277,6 +282,8 @@ class Media:
     title: str
     artist: str
     playing: bool
+    position: float = 0.0
+    duration: float = 0.0
 
 
 def fetch_stocks(symbols: list[str]) -> list[Quote]:
@@ -322,7 +329,16 @@ def fetch_media() -> Media | None:
             return None
         props = await session.try_get_media_properties_async()
         status = session.get_playback_info().playback_status
-        return Media(props.title or "", props.artist or "", int(status) == 4)
+        timeline = session.get_timeline_properties()
+        position = getattr(timeline, "position", None)
+        end = getattr(timeline, "end_time", None)
+        return Media(
+            props.title or "",
+            props.artist or "",
+            int(status) == 4,
+            position.total_seconds() if position else 0.0,
+            end.total_seconds() if end else 0.0,
+        )
 
     try:
         return asyncio.run(read())
@@ -355,7 +371,10 @@ class InfoPanel(Widget):
         cfg = (config or {}).get("info", {}) if isinstance(config, dict) else {}
         self.cfg = cfg
         self.modules: list[str] = list(cfg.get("modules") or ["stocks", "media", "todo", "notes"])
-        self.stocks: list[str] = list(cfg.get("stocks") or ["sh000001", "sz399001", "sh600519"])
+        self.stocks: list[str] = list(cfg.get("stocks") or [
+            "sh000001", "sz399001", "sh600519",
+            "usNVDA", "usAAPL", "usGOOGL", "usMSFT",
+        ])
         self.zones: list[str] = list(cfg.get("zones") or [
             "UTC", "America/New_York", "Europe/London", "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney",
         ])
@@ -372,7 +391,7 @@ class InfoPanel(Widget):
 
     def on_mount(self) -> None:
         self._load_todo()
-        self.set_interval(2.0, self._tick)
+        self.set_interval(1.0, self._tick)
         self.set_interval(5.0, self._poll_latency)
         self.set_interval(60.0, self._poll_stocks)
         self.set_interval(10.0, self._poll_media)
@@ -507,6 +526,10 @@ class InfoPanel(Widget):
         blocks.append(Text(""))
         blocks += self._sec_network(w)
         blocks.append(Text(""))
+        media = self._sec_media(w)
+        if media:
+            blocks += media
+            blocks.append(Text(""))
         blocks += self._sec_custom(w)
         notes = self._sec_notes(w)
         if notes:
@@ -647,9 +670,64 @@ class InfoPanel(Widget):
         lines.append(row)
         return lines
 
+    def _sec_media(self, w: int) -> list[Text]:
+        if "media" not in self.modules:
+            return []
+        c = self._style()
+        m = self.state.media
+        bars = "▁▂▃▄▅▆▇█"
+        if m and m.playing:
+            now = time.monotonic()
+            eq = "".join(bars[1 + int((math.sin(now * 3.1 + i * 1.27) + 1) * 3)] for i in range(5))
+        else:
+            eq = "▁▁▁▁▁"
+
+        head = Text(no_wrap=True, end="")
+        head.append("◤ ", c["cyan"])
+        head.append("音乐", f"bold {c['cyan']}")
+        head.append("   " + eq, c["mag"] if m and m.playing else c["dim"])
+        if m:
+            head.append("  ▶" if m.playing else "  ❚❚", c["dim"])
+        lines = [head]
+
+        if not m or not m.title:
+            lines.append(Text(" 未在播放", style=c["dim"]))
+            return lines
+
+        title = m.title
+        avail = max(6, w - 3)
+        if len(title) > avail and m.playing:
+            padded = title + "   "
+            offset = int(time.monotonic() * 4) % len(padded)
+            title = (padded + padded)[offset:offset + avail]
+        row = Text(no_wrap=True, end="")
+        row.append(" ♪ ", c["mag"] if m.playing else c["dim"])
+        row.append(title[:avail], f"bold {c['text']}")
+        lines.append(row)
+
+        if m.artist:
+            artist = Text(no_wrap=True, end="")
+            artist.append("   " + m.artist[: max(4, w - 4)], c["dim"])
+            lines.append(artist)
+
+        if m.duration > 1:
+            ratio = max(0.0, min(1.0, m.position / m.duration))
+            bar_w = max(6, w - 18)
+            progress = Text(no_wrap=True, end="")
+            progress.append(" ")
+            for ch, color in theme.gauge(ratio, bar_w, [theme.P.red, theme.P.magenta],
+                                         filled="▰", empty="▱"):
+                progress.append(ch, color)
+            pos = int(m.position)
+            dur = int(m.duration)
+            progress.append(f" {pos // 60}:{pos % 60:02d}/{dur // 60}:{dur % 60:02d}", c["dim"])
+            lines.append(progress)
+        return lines
+
     def _sec_custom(self, w: int) -> list[Text]:
         c = self._style()
-        lines = [self._header("自选", " ".join(m.upper() for m in self.modules))]
+        mods = [m.upper() for m in self.modules if m != "media"]
+        lines = [self._header("自选", " ".join(mods))]
         if "stocks" in self.modules:
             if self.state.quotes:
                 for q in self.state.quotes[:8]:
@@ -662,17 +740,6 @@ class InfoPanel(Widget):
                     lines.append(row)
             else:
                 lines.append(Text(" 行情 --", style=c["dim"]))
-        if "media" in self.modules:
-            media = self.state.media
-            row = Text(no_wrap=True, end="")
-            if media and media.title:
-                row.append(" ♪ ", c["mag"] if media.playing else c["dim"])
-                row.append(media.title[: max(4, w - 12)], c["text"])
-                if media.artist:
-                    row.append(" — " + media.artist[:10], c["dim"])
-            else:
-                row.append(" ♪ 未在播放", c["dim"])
-            lines.append(row)
         if "todo" in self.modules:
             todo = self.state.todo
             path = self._todo_file()

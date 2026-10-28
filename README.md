@@ -73,7 +73,7 @@ $env:CYBERDECK_CITY = "Shanghai"; uv run cyberdeck
 
 ## 地球定位标注
 
-天气数据里带回城市坐标后，地球表面会出现一个**脉动的青色标记**，旁边标着城市名；转到背面时自动隐藏（`MERIDIAN` 读数会同步显示当前正对的经线）。
+天气数据里带回城市坐标后，地球表面会出现一个**脉动的红色标记**，旁边标着城市名；转到背面时自动隐藏（`MERIDIAN` 读数会同步显示当前正对的经线）。
 
 
 ## 主题
@@ -101,7 +101,7 @@ $env:CYBERDECK_CITY = "Shanghai"; uv run cyberdeck
   "info": {
     "enabled": true,
     "modules": ["stocks", "media", "todo", "notes"],
-    "stocks": ["sh000001", "sz399001", "sh600519"],
+    "stocks": ["sh000001", "sz399001", "sh600519", "usNVDA", "usAAPL", "usGOOGL", "usMSFT"],
     "zones": ["UTC", "America/New_York", "Europe/London", "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney"],
     "todo_file": null,
     "notes_file": null
@@ -116,7 +116,7 @@ $env:CYBERDECK_CITY = "Shanghai"; uv run cyberdeck
 | 逐时 | 未来 8 小时温度/天气 + 温度曲线 | wttr.in 缓存 |
 | NET | 延迟/抖动/丢包 + AQI/PM2.5 | TCP 握手 + Open-Meteo |
 | stocks | 上证/深证/个股（`sh`/`sz`/`us` 前缀） | 腾讯行情 |
-| media | 正在播放的歌 / 歌手 | Windows 媒体会话（winrt） |
+| media | 正在播放：律动条 + 标题 + 歌手 + 进度条 | Windows 媒体会话（winrt） |
 | todo | 待办清单 | `todo_file` 或 `%LOCALAPPDATA%\cyberdeck\todo.txt` |
 | notes | 自由便签（任意文本，最多 10 行） | `notes_file` 或 `%LOCALAPPDATA%\cyberdeck\notes.txt` |
 

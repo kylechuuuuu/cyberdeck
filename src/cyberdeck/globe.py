@@ -168,7 +168,7 @@ class GlobeEngine:
         dot = np.exp(-((dist / 0.8) ** 2)) * 0.70
         glow = np.exp(-((dist / 2.6) ** 2)) * 0.10
         weight = np.clip(ring + dot + glow, 0, 1)[..., None]
-        img[y0:y1, x0:x1] += weight * np.array(p.cyan, np.float32)
+        img[y0:y1, x0:x1] += weight * np.array(p.red, np.float32)
 
     def render(self, w: int, h: int, yaw: float, t: float, tilt: float = TILT,
                marker: tuple[float, float] | None = None) -> np.ndarray:
@@ -288,7 +288,8 @@ def _overlay(chars: np.ndarray, keys: np.ndarray, row: int, col: int, text: str,
 
 
 def image_to_text(img: np.ndarray, caption: str | None = None, hud: list[str] | None = None,
-                  label: tuple[int, int, str] | None = None) -> Text:
+                  label: tuple[int, int, str] | None = None,
+                  label_color: tuple[int, int, int] | None = None) -> Text:
     """Pack an RGB image (2 pixels per cell) into a truecolor half-block Text."""
     ph, w, _ = img.shape
     h = ph // 2
@@ -310,7 +311,9 @@ def image_to_text(img: np.ndarray, caption: str | None = None, hud: list[str] | 
         _overlay(chars, keys, h - 1, 0, caption, cyan, bg)
     if label is not None:
         col, row, text = label
-        _overlay(chars, keys, row, max(0, col), text, cyan, bg)
+        tone = label_color or p.cyan
+        _overlay(chars, keys, row, max(0, col), text,
+                 (tone[0] << 16) | (tone[1] << 8) | tone[2], bg)
 
     out = Text(no_wrap=True, end="")
     for y in range(h):
@@ -407,7 +410,8 @@ class Globe(Widget):
                 col = max(0, cx - len(text) - 2)
             label = (col, max(0, min(h - 3, cy)), text)
 
-        result = image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"], label=label)
+        result = image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"],
+                               label=label, label_color=theme.P.red)
         self._frame_ms = (time.perf_counter() - start) * 1000
         return result
 
