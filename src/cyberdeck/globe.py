@@ -261,6 +261,8 @@ def _hex(rgb: np.ndarray) -> str:
     key = (int(rgb[0]) << 16) | (int(rgb[1]) << 8) | int(rgb[2])
     s = _HEX.get(key)
     if s is None:
+        if len(_HEX) > 20000:  # long-running dashboards can see thousands of shades
+            _HEX.clear()
         s = f"#{key:06x}"
         _HEX[key] = s
     return s

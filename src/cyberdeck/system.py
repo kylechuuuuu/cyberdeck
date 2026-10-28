@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 import platform
+import plistlib
+import re
 import shutil
 import subprocess
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import psutil
 from rich.cells import cell_len
@@ -20,7 +24,10 @@ from textual.widget import Widget
 from . import theme
 
 IS_WIN = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
+IS_APPLE_SILICON = IS_MAC and platform.machine() == "arm64"
 NO_WINDOW = 0x08000000 if IS_WIN else 0
+MIB = 1024 * 1024
 POWERSHELL = shutil.which("powershell") or "powershell"
 
 
@@ -38,6 +45,8 @@ class Gpu:
     clock_mem: float = 0.0
     enc: float = 0.0
     dec: float = 0.0
+    cores: int = 0
+    unified: bool = False
 
 
 @dataclass
@@ -97,8 +106,25 @@ class State:
     threads_total: int = 0
     handles_total: int = 0
     boot_time: float = 0.0
-    battery: tuple[float, bool, float] | None = None
+    battery: tuple[float, bool, int] | None = None
     uptime: float = 0.0
+    thermal: int = 100  # CPU speed limit %, macOS only
+    pressure: int = 0  # 0 normal / 1 warn / 2 critical, macOS only
+
+
+def _run(cmd: list[str], timeout: float = 2.0) -> str:
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _sysctl(name: str) -> str:
+    if not IS_MAC:
+        return ""
+    return _run([shutil.which("sysctl") or "/usr/sbin/sysctl", "-n", name])
 
 
 def cpu_model() -> str:
@@ -112,11 +138,111 @@ def cpu_model() -> str:
                 return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip()
         except OSError:
             pass
+    if IS_MAC:
+        name = _sysctl("machdep.cpu.brand_string")
+        if name:
+            return name
+        return "Apple Silicon" if IS_APPLE_SILICON else platform.processor() or "CPU"
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.lower().startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
     return platform.processor() or "CPU"
+
+
+def cpu_clusters() -> list[tuple[str, int]]:
+    """Apple Silicon performance/efficiency clusters, e.g. [("P", 4), ("E", 6)]."""
+    if not IS_APPLE_SILICON:
+        return []
+    out: list[tuple[str, int]] = []
+    for i in range(4):
+        count = _sysctl(f"hw.perflevel{i}.physicalcpu")
+        if not count.isdigit() or int(count) <= 0:
+            break
+        name = _sysctl(f"hw.perflevel{i}.name").lower()
+        out.append(("E" if "effic" in name else "P", int(count)))
+    return out
 
 
 def short(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    try:
+        return int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_ioreg_gpu(payload: bytes) -> Gpu | None:
+    """Parse `ioreg -a -c IOAccelerator` output (Apple Silicon / Intel Macs)."""
+    if not payload:
+        return None
+    try:
+        entries = plistlib.loads(payload)
+    except Exception:
+        return None
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        return None
+
+    best: Gpu | None = None
+    best_score = -1.0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        stats = entry.get("PerformanceStatistics")
+        if not isinstance(stats, dict):
+            continue
+        util = _as_float(stats.get("Device Utilization %", stats.get("Renderer Utilization %", 0.0)))
+        model = entry.get("model")
+        if isinstance(model, bytes):
+            model = model.decode("utf-8", "replace")
+        io_class = str(entry.get("IOClass", ""))
+        name = str(model).strip() if model else ("Apple GPU" if io_class.startswith("AGX") else "GPU")
+        mem_bytes = _as_int(stats.get("In use system memory"))
+        if not mem_bytes:
+            mem_bytes = _as_int(stats.get("vramUsedBytes"))
+        vram_mb = _as_int(entry.get("VRAM,totalMB") or entry.get("VRAM,totalMBytes"))
+        merged = name.startswith("Apple") or io_class.startswith("AGX")
+        candidate = Gpu(
+            name=name.replace("NVIDIA ", ""),
+            util=util,
+            mem_used=round(mem_bytes / MIB),
+            mem_total=vram_mb,
+            temp=0.0,
+            power=0.0,
+            cores=_as_int(entry.get("gpu-core-count")),
+            unified=merged,
+        )
+        score = util + (50 if mem_bytes else 0) + (10 if candidate.cores else 0)
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
+
+
+def _mac_gpu() -> Gpu | None:
+    exe = shutil.which("ioreg") or "/usr/sbin/ioreg"
+    try:
+        out = subprocess.run(
+            [exe, "-a", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"],
+            capture_output=True,
+            timeout=3,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_ioreg_gpu(out)
 
 
 def _num(value: str) -> float | None:
@@ -130,6 +256,8 @@ def _num(value: str) -> float | None:
 
 
 def _gpu_sample() -> Gpu | None:
+    if IS_MAC:
+        return _mac_gpu()
     exe = shutil.which("nvidia-smi")
     if not exe:
         return None
@@ -208,6 +336,97 @@ def _disk_models() -> dict[int, str]:
     return models
 
 
+def parse_thermal_limit(text: str) -> int:
+    """`pmset -g therm` -> CPU speed limit % (100 when nothing is throttled)."""
+    match = re.search(r"CPU_Speed_Limit\s*=\s*(\d+)", text)
+    return min(100, int(match.group(1))) if match else 100
+
+
+def _thermal_limit() -> int:
+    exe = shutil.which("pmset") or "/usr/bin/pmset"
+    return parse_thermal_limit(_run([exe, "-g", "therm"]))
+
+
+def _memory_pressure() -> int:
+    try:
+        return int(_sysctl("vm.memory_pressure") or 0)
+    except ValueError:
+        return 0
+
+
+# interfaces whose traffic duplicates real traffic (loopback, AirDrop, AWDL)
+_MAC_NET_SKIP = {
+    "lo0", "gif0", "stf0", "awdl0", "llw0", "ap1",
+    "anpi0", "anpi1", "bridge0", "nan0",
+}
+
+
+def _net_totals() -> tuple[int, int]:
+    if IS_MAC:
+        try:
+            rx = tx = 0
+            for name, counters in psutil.net_io_counters(pernic=True).items():
+                if name in _MAC_NET_SKIP or name.startswith("utun"):
+                    continue
+                rx += counters.bytes_recv
+                tx += counters.bytes_sent
+            return rx, tx
+        except (psutil.Error, OSError):
+            pass
+    counters = psutil.net_io_counters()
+    if counters is None:
+        return 0, 0
+    return counters.bytes_recv, counters.bytes_sent
+
+
+def _mac_disks() -> list[Disk]:
+    """APFS reports `/` and `/System/Volumes/Data` separately; show the Data volume as `/`."""
+    try:
+        parts = psutil.disk_partitions(all=False)
+    except (psutil.Error, OSError):
+        return []
+    local_fs = {"apfs", "hfs", "exfat", "msdos", "ntfs", "fuseblk"}
+    targets: list[tuple[str, str]] = []
+    data = next((p for p in parts if p.mountpoint == "/System/Volumes/Data"), None)
+    targets.append(("/", data.mountpoint if data else "/"))
+    for part in parts:
+        if part.mountpoint.startswith("/Volumes/") and part.fstype in local_fs:
+            targets.append((Path(part.mountpoint).name or part.mountpoint, part.mountpoint))
+
+    out: list[Disk] = []
+    seen: set[str] = set()
+    for label, mount in targets:
+        if mount in seen:
+            continue
+        seen.add(mount)
+        try:
+            usage = psutil.disk_usage(mount)
+        except OSError:
+            continue
+        out.append(Disk(label[:12], usage.used, usage.total))
+    return out
+
+
+def list_disks() -> list[Disk]:
+    if IS_MAC:
+        return _mac_disks()
+    out: list[Disk] = []
+    try:
+        partitions = psutil.disk_partitions(all=False)
+    except (psutil.Error, OSError):
+        return out
+    for part in partitions:
+        if "cdrom" in part.opts or not part.fstype:
+            continue
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+        except OSError:
+            continue
+        label = part.device.rstrip("\\") if IS_WIN else part.mountpoint
+        out.append(Disk(label or part.mountpoint, usage.used, usage.total))
+    return out
+
+
 class Sampler:
     def __init__(self) -> None:
         psutil.cpu_percent(None)
@@ -215,20 +434,32 @@ class Sampler:
         self.ncpu = psutil.cpu_count(logical=True) or 1
         self.cores = psutil.cpu_count(logical=False) or 1
         self.cpu_name = cpu_model()
+        clusters = cpu_clusters()
+        if clusters:
+            self.layout = " + ".join(f"{count}{label}" for label, count in clusters)
+        elif self.cores == self.ncpu:
+            self.layout = f"{self.cores}C"
+        else:
+            self.layout = f"{self.cores}C/{self.ncpu}T"
         self.state = State()
         self.cpu_hist: deque[float] = deque(maxlen=72)
         self.net_hist: deque[float] = deque(maxlen=72)
         self.gpu_hist: deque[float] = deque(maxlen=72)
-        self._prev_net = psutil.net_io_counters()
-        self._prev_disk = psutil.disk_io_counters()
+        self._prev_net = _net_totals()
+        try:
+            self._prev_disk = psutil.disk_io_counters()
+        except (psutil.Error, OSError):
+            self._prev_disk = None
         self._prev_disk_each = psutil.disk_io_counters(perdisk=True) or {}
         self._prev_t = time.monotonic()
         self._prev_cpu: dict[int, tuple[float, float]] = {}
         self._prev_ctx = psutil.cpu_stats().ctx_switches
         self._slow_t = 0.0
         self._sensor_t = 0.0
+        self._mac_status_t = 0.0
         self._disk_models: dict[int, str] | None = None
         self.loaded = False
+        self._procs()  # prime per-process CPU deltas so the first table isn't all zeros
 
     # -- fast (every ~0.7 s) ------------------------------------------------
     def fast(self) -> State:
@@ -236,23 +467,34 @@ class Sampler:
         s.cpu = psutil.cpu_percent(None)
         s.per_core = psutil.cpu_percent(None, percpu=True)
         self.cpu_hist.append(s.cpu)
-        freq = psutil.cpu_freq()
-        s.freq = (freq.current / 1000) if freq else 0.0
+        if IS_APPLE_SILICON:
+            s.freq = 0.0  # psutil reports a static 4.0 GHz on Apple Silicon
+        else:
+            try:
+                freq = psutil.cpu_freq()
+            except (NotImplementedError, psutil.Error):
+                freq = None
+            s.freq = (freq.current / 1000) if freq else 0.0
 
         vm = psutil.virtual_memory()
-        s.mem_pct, s.mem_used, s.mem_total = vm.percent, vm.used, vm.total
+        s.mem_total = vm.total
+        s.mem_used = max(0, vm.total - vm.available)
+        s.mem_pct = (s.mem_used / vm.total * 100.0) if vm.total else vm.percent
         sw = psutil.swap_memory()
         s.swap_used, s.swap_total = sw.used, sw.total
 
         now = time.monotonic()
         dt = max(1e-3, now - self._prev_t)
-        net = psutil.net_io_counters()
-        s.down = max(0.0, (net.bytes_recv - self._prev_net.bytes_recv) / dt)
-        s.up = max(0.0, (net.bytes_sent - self._prev_net.bytes_sent) / dt)
-        self._prev_net, self._prev_t = net, now
+        rx, tx = _net_totals()
+        s.down = max(0.0, (rx - self._prev_net[0]) / dt)
+        s.up = max(0.0, (tx - self._prev_net[1]) / dt)
+        self._prev_net, self._prev_t = (rx, tx), now
         self.net_hist.append(s.down + s.up)
 
-        io = psutil.disk_io_counters()
+        try:
+            io = psutil.disk_io_counters()
+        except (psutil.Error, OSError):
+            io = None
         if io and self._prev_disk:
             s.disk_read = max(0.0, (io.read_bytes - self._prev_disk.read_bytes) / dt)
             s.disk_write = max(0.0, (io.write_bytes - self._prev_disk.write_bytes) / dt)
@@ -287,9 +529,13 @@ class Sampler:
 
         s.uptime = time.time() - psutil.boot_time()
         s.boot_time = psutil.boot_time()
-        bat = psutil.sensors_battery()
+        try:
+            bat = psutil.sensors_battery()
+        except (psutil.Error, OSError, NotImplementedError):
+            bat = None
         if bat:
-            left = bat.secsleft if 0 < bat.secsleft < 86400 else -1
+            secs = int(bat.secsleft)
+            left = secs if 0 < secs < 86400 else -1
             s.battery = (bat.percent, bat.power_plugged, left)
         return s
 
@@ -310,15 +556,12 @@ class Sampler:
             self._sensor_t = time.monotonic()
             s.acpi_temp = _acpi_temperature()
 
-        s.disks = []
-        for part in psutil.disk_partitions(all=False):
-            if "cdrom" in part.opts or not part.fstype:
-                continue
-            try:
-                usage = psutil.disk_usage(part.mountpoint)
-            except OSError:
-                continue
-            s.disks.append(Disk(part.device.rstrip("\\") or part.mountpoint, usage.used, usage.total))
+        s.disks = list_disks()
+
+        if IS_MAC and time.monotonic() - self._mac_status_t >= 8:
+            self._mac_status_t = time.monotonic()
+            s.thermal = _thermal_limit()
+            s.pressure = _memory_pressure()
 
         s.nics = self._nics()
         s.procs, s.threads_total, s.handles_total = self._procs()
@@ -330,15 +573,26 @@ class Sampler:
         addrs = psutil.net_if_addrs()
         out: list[Nic] = []
         for name, st in stats.items():
-            if not st.isup or st.speed <= 0 or "loopback" in name.lower() or "bluetooth" in name.lower():
+            if not st.isup:
+                continue
+            if IS_MAC:
+                # only physical en* interfaces: utun/AWDL/Private Relay would duplicate traffic
+                if name in _MAC_NET_SKIP or not name.startswith("en"):
+                    continue
+            elif st.speed <= 0 or "loopback" in name.lower() or "bluetooth" in name.lower():
                 continue
             ipv4 = ""
             for addr in addrs.get(name, []):
                 if addr.family.name == "AF_INET":
                     ipv4 = addr.address
                     break
+            if IS_MAC and not ipv4 and name != "en0":
+                continue
             out.append(Nic(name=name, speed=float(st.speed), ipv4=ipv4, up=st.isup))
-        out.sort(key=lambda n: n.speed, reverse=True)
+        if IS_MAC:
+            out.sort(key=lambda n: (not n.name.startswith("en"), -n.speed, n.name))
+        else:
+            out.sort(key=lambda n: n.speed, reverse=True)
         return out[:3]
 
     def _procs(self, limit: int = 48) -> tuple[list[Proc], int, int]:
@@ -346,29 +600,32 @@ class Sampler:
         out: list[Proc] = []
         seen: dict[int, tuple[float, float]] = {}
         threads_total = handles_total = 0
-        for p in psutil.process_iter(
-            ["pid", "name", "cpu_times", "memory_info", "num_threads", "num_handles", "create_time"]
-        ):
+        attrs = ["pid", "name", "cpu_times", "memory_info", "num_threads", "create_time"]
+        handle_key = "num_handles" if IS_WIN else "num_fds"
+        attrs.append(handle_key)
+        for p in psutil.process_iter(attrs):
             try:
                 info = p.info
-                pid = int(info["pid"])
-                if pid <= 4:
+                pid = info.get("pid")
+                if pid is None or int(pid) <= 4:
                     continue
-                ct = info["cpu_times"]
-                total = ct.user + ct.system
+                pid = int(pid)
+                cpu_times = info.get("cpu_times")
+                total = (cpu_times.user + cpu_times.system) if cpu_times else 0.0
                 prev = self._prev_cpu.get(pid)
                 seen[pid] = (total, now)
                 pct = (total - prev[0]) / (now - prev[1]) / self.ncpu * 100 if prev and now > prev[1] else 0.0
-                rss = info["memory_info"].rss if info["memory_info"] else 0
-                threads = int(info["num_threads"] or 0)
-                handles = int(info["num_handles"] or 0)
+                mem_info = info.get("memory_info")
+                rss = mem_info.rss if mem_info else 0
+                threads = int(info.get("num_threads") or 0)
+                handles = int(info.get(handle_key) or 0)
                 threads_total += threads
                 handles_total += handles
                 out.append(Proc(
-                    short(info["name"] or "?", 22), pid, pct, rss, threads, handles,
-                    float(info["create_time"] or 0.0),
+                    short(str(info.get("name") or "?"), 60), pid, pct, rss, threads, handles,
+                    float(info.get("create_time") or 0.0),
                 ))
-            except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError, TypeError):
+            except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError, TypeError, AttributeError):
                 continue
         self._prev_cpu = seen
         out.sort(key=lambda x: (x.cpu, x.rss), reverse=True)
@@ -576,11 +833,15 @@ class SystemPanel(Widget):
         c = self._style()
         s = self.sampler.state
         lines = [self._header("CPU", w)]
-        name = self.sampler.cpu_name.replace("(R)", "").replace("(TM)", "").replace("CPU ", "")
+        name = self.sampler.cpu_name.replace("(R)", "").replace("(TM)", "").replace("CPU ", "").strip()
+        if s.freq:
+            name = re.sub(r"\s+@\s*[\d.]+\s*GHz.*$", "", name)
         lines.append(Text(short(name, w - 2), style=c["text"]))
-        spec = f"{self.sampler.cores}C/{self.sampler.ncpu}T"
+        spec = self.sampler.layout
         if s.freq:
             spec += f" · {s.freq:.2f}GHz"
+        if s.thermal < 100:
+            spec += f" · THR {s.thermal}%"
         lines.append(Text(" " + spec, style=c["dim"]))
         bar_w = max(6, w - 9)
         lines.append(self._bar(s.cpu / 100, bar_w, [theme.P.cyan, theme.P.purple, theme.P.magenta],
@@ -612,7 +873,10 @@ class SystemPanel(Widget):
         lines = [self._header("MEM", w)]
         value = Text(no_wrap=True, end="")
         value.append(f"{theme.fmt_bytes(s.mem_used)} / {theme.fmt_bytes(s.mem_total)}", c["text"])
-        value.append(f"  {s.mem_pct:.0f}%", f"bold {c['mag']}")
+        pct_color = "red" if s.pressure >= 2 else "amb" if s.pressure == 1 else "mag"
+        value.append(f"  {s.mem_pct:.0f}%", f"bold {c[pct_color]}")
+        if s.pressure:
+            value.append(" ⚠", c[pct_color])
         lines.append(value)
         lines.append(self._bar(s.mem_pct / 100, max(6, w - 2), [theme.P.cyan, theme.P.blue, theme.P.magenta]))
         swap_pct = s.swap_used / s.swap_total if s.swap_total else 0.0
@@ -630,37 +894,49 @@ class SystemPanel(Widget):
         g = s.gpu
         lines = [self._header("GPU", w)]
         if not g:
-            text = " 采样中…" if not self.sampler.loaded else " 集成显卡 / nvidia-smi 不可用"
+            if not self.sampler.loaded:
+                text = " 采样中…"
+            elif IS_MAC:
+                text = " 未读取到 Apple GPU（ioreg）"
+            else:
+                text = " 集成显卡 / nvidia-smi 不可用"
             lines.append(Text(text, style=c["dim"]))
             return lines
         info = Text(no_wrap=True, end="")
         info.append(f" {g.util:3.0f}%", f"bold {c['mag']}")
-        info.append(f"  {g.mem_used / 1024:.1f}/{g.mem_total / 1024:.1f}G", c["dim"])
-        info.append(f"  {g.temp:.0f}°C", c["amb"])
+        if g.mem_total:
+            info.append(f"  {g.mem_used / 1024:.1f}/{g.mem_total / 1024:.1f}G", c["dim"])
+        elif g.mem_used:
+            used = theme.fmt_bytes(g.mem_used * MIB)
+            info.append(f"  {'UMA ' if g.unified else ''}{used}", c["dim"])
+        if g.temp:
+            info.append(f"  {g.temp:.0f}°C", c["amb"])
         if g.fan is not None:
             info.append(f"  {g.fan:.0f}rpm", c["dim"])
+        name = g.name + (f" {g.cores}C" if g.cores else "")
+        bar_w = max(6, w - 2)
         if compact:
-            lines.append(Text(" " + short(g.name, max(6, w - 2)), style=c["text"]))
+            lines.append(Text(" " + short(name, w - 2), style=c["text"]))
             lines.append(info)
-            lines.append(self._bar(g.util / 100, max(6, w - 2),
-                                   [theme.P.magenta, theme.P.red, theme.P.amber]))
+            lines.append(self._bar(g.util / 100, bar_w, [theme.P.magenta, theme.P.red, theme.P.amber]))
             return lines
-        lines.append(Text(" " + short(g.name, w - 2), style=c["text"]))
+        lines.append(Text(" " + short(name, w - 2), style=c["text"]))
         lines.append(info)
-        lines.append(self._bar(g.util / 100, max(6, w - 2),
-                               [theme.P.magenta, theme.P.red, theme.P.amber]))
-        vram = Text(no_wrap=True, end="")
-        vram.append("VRAM ", c["dim"])
-        ratio = g.mem_used / g.mem_total if g.mem_total else 0.0
-        for ch, color in theme.gauge(ratio, max(4, w - 20), [theme.P.purple, theme.P.cyan]):
-            vram.append(ch, color)
-        vram.append(f" {g.power:.0f}W", c["dim"])
-        if g.power_limit:
-            vram.append(f"/{g.power_limit:.0f}W", c["dim"])
-        lines.append(vram)
-        clocks = Text(no_wrap=True, end="")
-        clocks.append(f" GFX {g.clock_gfx:.0f}MHz  MEM {g.clock_mem:.0f}MHz", c["dim"])
-        lines.append(clocks)
+        lines.append(self._bar(g.util / 100, bar_w, [theme.P.magenta, theme.P.red, theme.P.amber]))
+        if g.mem_total:
+            vram = Text(no_wrap=True, end="")
+            vram.append("VRAM ", c["dim"])
+            ratio = g.mem_used / g.mem_total if g.mem_total else 0.0
+            for ch, color in theme.gauge(ratio, max(4, w - 20), [theme.P.purple, theme.P.cyan]):
+                vram.append(ch, color)
+            vram.append(f" {g.power:.0f}W", c["dim"])
+            if g.power_limit:
+                vram.append(f"/{g.power_limit:.0f}W", c["dim"])
+            lines.append(vram)
+        if g.clock_gfx or g.clock_mem:
+            clocks = Text(no_wrap=True, end="")
+            clocks.append(f" GFX {g.clock_gfx:.0f}MHz  MEM {g.clock_mem:.0f}MHz", c["dim"])
+            lines.append(clocks)
         if g.enc or g.dec:
             codec = Text(no_wrap=True, end="")
             codec.append(f" ENC {g.enc:.0f}%  DEC {g.dec:.0f}%", c["dim"])
@@ -689,7 +965,8 @@ class SystemPanel(Widget):
         for nic in s.nics[:2]:
             row = Text(no_wrap=True, end="")
             row.append(" " + short(nic.name, 10), c["text"])
-            row.append(f" {nic.speed:.0f}M", c["dim"])
+            if nic.speed > 0:
+                row.append(f" {nic.speed:.0f}M", c["dim"])
             if nic.ipv4:
                 row.append(f"  {nic.ipv4}", c["dim"])
             lines.append(row)
@@ -702,7 +979,7 @@ class SystemPanel(Widget):
         for d in s.disks[:3]:
             pct = d.used / d.total if d.total else 0.0
             row = Text(no_wrap=True, end="")
-            row.append(f"{d.mount:<4}", c["dim"])
+            row.append(f" {d.mount[:6]:<6}", c["dim"])
             for ch, color in theme.gauge(pct, max(4, w - 20), [theme.P.cyan, theme.P.purple, theme.P.magenta]):
                 row.append(ch, color)
             row.append(f" {theme.fmt_bytes(d.total - d.used)} free", c["dim"])
@@ -712,6 +989,13 @@ class SystemPanel(Widget):
             row.append(" " + short(io.label, 14), c["dim"])
             row.append(f" R {theme.fmt_rate(io.read)}", c["text"])
             row.append(f" W {theme.fmt_rate(io.write)}", c["dim"])
+            lines.append(row)
+        if not s.disk_ios and (s.disk_read or s.disk_write):
+            row = Text(no_wrap=True, end="")
+            row.append(" R ", c["dim"])
+            row.append(theme.fmt_rate(s.disk_read), c["text"])
+            row.append("  W ", c["dim"])
+            row.append(theme.fmt_rate(s.disk_write), c["text"])
             lines.append(row)
         return lines
 
@@ -725,9 +1009,16 @@ class SystemPanel(Widget):
             row.append(f"{s.acpi_temp:.0f}°C", c["amb"])
             row.append("  (主板热区)", c["dim"])
             lines.append(row)
+        handle_label = "句柄" if IS_WIN else "FD"
+        handles = f"{s.handles_total / 1000:.0f}k" if s.handles_total >= 10000 else str(s.handles_total)
         row = Text(no_wrap=True, end="")
-        row.append(f" 线程 {s.threads_total}  句柄 {s.handles_total / 1000:.0f}k", c["dim"])
+        row.append(f" 线程 {s.threads_total}  {handle_label} {handles}", c["dim"])
         lines.append(row)
+        if s.thermal < 100:
+            row = Text(no_wrap=True, end="")
+            row.append(f" THR {s.thermal}%", c["amb"])
+            row.append("  降频中", c["dim"])
+            lines.append(row)
         row = Text(no_wrap=True, end="")
         row.append(f" CTX {s.ctx_switches / 1000:.0f}k/s", c["dim"])
         row.append(f"  提交 {theme.fmt_bytes(s.swap_used)}", c["dim"])
@@ -782,7 +1073,8 @@ class SystemPanel(Widget):
         detail = Text(no_wrap=True, end="")
         if procs and self.cursor < len(procs):
             proc = procs[self.cursor]
-            detail.append(f" {proc.pid} · {proc.threads} thr · {proc.handles} h", c["dim"])
+            handle_suffix = "h" if IS_WIN else "fd"
+            detail.append(f" {proc.pid} · {proc.threads} thr · {proc.handles} {handle_suffix}", c["dim"])
             if proc.created:
                 detail.append(f" · {datetime.fromtimestamp(proc.created):%H:%M}", c["dim"])
         lines.append(detail)

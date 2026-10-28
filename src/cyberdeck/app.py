@@ -3,24 +3,39 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import platform
 import socket
+import sys
 from datetime import datetime
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 
-from . import storage, theme
+from . import __version__, storage, theme
 from .clock import ClockPanel
 from .editor import EditorScreen
 from .extras import InfoPanel, parse_symbols
 from .globe import Globe
 from .system import SystemPanel
 from .weather import WeatherPanel
+
+HOSTNAME = socket.gethostname().split(".")[0].upper()
+
+
+@functools.lru_cache(maxsize=1)
+def os_label() -> str:
+    if sys.platform == "darwin":
+        version = platform.mac_ver()[0]
+        return f"macOS {version}" if version else "macOS"
+    if os.name == "nt":
+        return f"Windows {platform.release()}"
+    return platform.system()
 
 
 class TopBar(Widget):
@@ -43,7 +58,7 @@ def topbar_text(width: int) -> Text:
         t.append(ch, f"bold {theme.hexc(theme.ramp([p.cyan, p.purple, p.magenta], i / max(1, len(title) - 1)))}")
     t.append("  //  ", theme.hexc(p.dim))
     t.append("TERMINAL OPS", theme.hexc(p.dim))
-    right = f"{socket.gethostname().upper()}  ·  {platform.system()}  ·  {datetime.now():%H:%M:%S} "
+    right = f"{HOSTNAME}  ·  {os_label()}  ·  {datetime.now():%H:%M:%S} "
     pad = max(0, width - len(title) - 18 - len(right))
     t.append(" " * pad, "")
     t.append(right, theme.hexc(theme.mix(p.dim, p.bg, 0.25)))
@@ -56,10 +71,10 @@ class HintBar(Widget):
     """
 
     def render(self) -> Text:
-        return hintbar_text()
+        return hintbar_text(self.size.width)
 
 
-def hintbar_text() -> Text:
+def hintbar_text(width: int | None = None) -> Text:
     p = theme.P
     t = Text(no_wrap=True, end="")
     hints = [
@@ -75,12 +90,21 @@ def hintbar_text() -> Text:
         ("E", "编辑"),
     ]
     t.append(" ")
+    used = 1
     for key, label in hints:
-        t.append(f" {key} ", f"bold {theme.hexc(p.bg)} on {theme.hexc(p.cyan)}")
-        t.append(f" {label}  ", theme.hexc(p.dim))
-    t.append("· ", theme.hexc(p.dim))
-    t.append(p.label, f"bold {theme.hexc(p.magenta)}")
-    t.append(" ", "")
+        key_text = f" {key} "
+        label_text = f" {label}  "
+        chunk = cell_len(key_text) + cell_len(label_text)
+        if width is not None and used + chunk > width:
+            break
+        t.append(key_text, f"bold {theme.hexc(p.bg)} on {theme.hexc(p.cyan)}")
+        t.append(label_text, theme.hexc(p.dim))
+        used += chunk
+    tail = f"· {p.label} "
+    if width is None or used + cell_len(tail) <= width:
+        t.append("· ", theme.hexc(p.dim))
+        t.append(p.label, f"bold {theme.hexc(p.magenta)}")
+        t.append(" ", "")
     return t
 
 
@@ -93,7 +117,7 @@ class TooSmalMsg(Widget):
         p = theme.P
         t = Text(justify="center")
         t.append("\n 终端窗口太小\n\n", f"bold {theme.hexc(p.magenta)}")
-        t.append("请调整到至少 110 列 × 30 行\n", theme.hexc(p.text))
+        t.append("请调整到至少 110 列 × 30 行（推荐 210 × 55 开信息栏）\n", theme.hexc(p.text))
         t.append(f"当前 {self.app.size.width} × {self.app.size.height}\n", theme.hexc(p.dim))
         return t
 
@@ -123,7 +147,7 @@ class CyberDeck(App):
         Binding("ctrl+c", "quit", "退出", show=False),
         Binding("r", "refresh_weather", "刷新天气"),
         Binding("space", "toggle_spin", "暂停自转"),
-        Binding("plus,equal", "faster", "加速"),
+        Binding("plus,equal,shift+equal", "faster", "加速"),
         Binding("minus", "slower", "减速"),
         Binding("t", "cycle_theme", "配色"),
         Binding("i", "toggle_info", "信息栏"),
@@ -140,6 +164,7 @@ class CyberDeck(App):
 
     def __init__(self, city: str | None = None) -> None:
         super().__init__()
+        self.title = "CYBERDECK"
         self.config = storage.load_json("config.json") or {}
         self.city = city or self.config.get("city") or None
         self.theme_index = theme.palette_index(self.config.get("theme"))
@@ -162,6 +187,22 @@ class CyberDeck(App):
         self._apply_theme()
         self._sync_size(self.size)
         self.query_one(SystemPanel).focus()
+        self._terminal_hint()
+
+    def _terminal_hint(self) -> None:
+        """Apple Terminal has no truecolor; the Earth looks better in modern terminals."""
+        if sys.platform != "darwin":
+            return
+        if os.environ.get("TERM_PROGRAM") != "Apple_Terminal":
+            return
+        if os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit"):
+            return
+        self.notify(
+            "Apple Terminal 只支持 256 色，地球会丢失部分色彩。推荐 Ghostty / iTerm2 / WezTerm。",
+            title="终端配色提示",
+            severity="warning",
+            timeout=10,
+        )
 
     def on_resize(self, event) -> None:
         self._sync_size(event.size)
@@ -254,6 +295,7 @@ class CyberDeck(App):
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cyberdeck", description="Terminal cyberdeck dashboard")
     parser.add_argument("--city", help="wttr.in location, e.g. Hangzhou (default: auto by IP)")
+    parser.add_argument("--version", action="version", version=f"cyberdeck {__version__}")
     args = parser.parse_args()
     city = args.city or os.environ.get("CYBERDECK_CITY") or None
     CyberDeck(city=city).run()

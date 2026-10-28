@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import plistlib
 import sys
 import time
 from pathlib import Path
@@ -25,7 +26,14 @@ from cyberdeck.extras import (  # noqa: E402
     todo_lines,
 )
 from cyberdeck.globe import EarthTexture, GlobeEngine, image_to_text  # noqa: E402
-from cyberdeck.system import Proc, Sampler, SystemPanel  # noqa: E402
+from cyberdeck.system import (  # noqa: E402
+    Proc,
+    Sampler,
+    SystemPanel,
+    list_disks,
+    parse_ioreg_gpu,
+    parse_thermal_limit,
+)
 from cyberdeck.weather import (  # noqa: E402
     Weather,
     WeatherPanel,
@@ -79,6 +87,7 @@ def test_weather_parse():
 
 def test_weather_helpers():
     assert describe(296)[0] == "小雨"
+    assert describe(149)[0] == "烟霾"
     assert describe(999)[0] == "未知"
     assert wind_dir(0) == "北"
     assert wind_dir(315) == "西北"
@@ -316,3 +325,61 @@ def test_media_section():
 
 
 
+
+
+def test_ioreg_gpu_parser_apple_silicon():
+    payload = plistlib.dumps([{
+        "model": "Apple M5",
+        "gpu-core-count": 8,
+        "IOClass": "AGXAcceleratorG17G",
+        "PerformanceStatistics": {
+            "Device Utilization %": 17,
+            "In use system memory": 372834304,
+        },
+    }])
+    gpu = parse_ioreg_gpu(payload)
+    assert gpu is not None
+    assert gpu.name == "Apple M5"
+    assert gpu.cores == 8 and gpu.unified
+    assert gpu.mem_total == 0
+    assert gpu.mem_used == round(372834304 / 1024 / 1024)
+    assert gpu.util == 17
+
+
+def test_ioreg_gpu_parser_discrete():
+    payload = plistlib.dumps([{
+        "model": "AMD Radeon Pro 5500M",
+        "VRAM,totalMB": 4096,
+        "PerformanceStatistics": {
+            "Device Utilization %": 42,
+            "In use system memory": 1024 * 1024 * 1024,
+        },
+    }])
+    gpu = parse_ioreg_gpu(payload)
+    assert gpu is not None
+    assert gpu.mem_total == 4096 and gpu.mem_used == 1024
+    assert not gpu.unified
+
+
+def test_thermal_limit_parser():
+    assert parse_thermal_limit("CPU_Speed_Limit = 80\n") == 80
+    assert parse_thermal_limit("Note: No thermal warning level has been recorded\n") == 100
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS APFS volume layout")
+def test_mac_disks_hide_system_volumes():
+    disks = list_disks()
+    assert disks
+    assert disks[0].mount == "/"
+    assert disks[0].total > 0
+    assert all(not d.mount.startswith("/System") for d in disks)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS cache location")
+def test_mac_storage_locations():
+    from cyberdeck import storage
+
+    weather = storage.data_path("weather.json")
+    config = storage.data_path("config.json")
+    assert weather is not None and "Library/Caches/cyberdeck" in str(weather)
+    assert config is not None and "Library/Application Support/cyberdeck" in str(config)

@@ -43,9 +43,14 @@ asyncio.run(main())
 
 import resvg_py  # noqa: E402
 
+FONT = "Consolas" if sys.platform == "win32" else "Menlo" if sys.platform == "darwin" else "DejaVu Sans Mono"
+CJK = "Microsoft YaHei" if sys.platform == "win32" else "PingFang SC" if sys.platform == "darwin" else "Noto Sans CJK SC"
+
 svg = (OUT / "preview.svg").read_text(encoding="utf-8")
-svg = svg.replace('font-family: "Fira Code";', 'font-family: "Consolas";')
-svg = svg.replace("font-family: Fira Code, monospace;", "font-family: Consolas, monospace;")
-png = bytes(resvg_py.svg_to_bytes(svg, width=1920, monospace_family="Consolas"))
+svg = svg.replace('font-family: "Fira Code";', f'font-family: "{FONT}";')
+svg = svg.replace("font-family: Fira Code, monospace;", f"font-family: {FONT}, monospace;")
+png = bytes(resvg_py.svg_to_bytes(
+    svg, width=1920, monospace_family=FONT, sans_serif_family=CJK,
+))
 (ROOT / "docs" / "preview.png").write_bytes(png)
 print("wrote docs/preview.png", len(png), "bytes")

@@ -25,6 +25,7 @@ CODE_ZH: dict[int, tuple[str, str]] = {
     119: ("阴", "dim"),
     122: ("阴天", "dim"),
     143: ("薄雾", "dim"),
+    149: ("烟霾", "dim"),
     176: ("零星阵雨", "blue"),
     179: ("零星阵雪", "ice"),
     182: ("雨夹雪", "ice"),
@@ -260,7 +261,7 @@ class WeatherPanel(Widget):
             out.append(f" {d.temp}° ", theme.hexc(accent))
             out.append(desc, theme.hexc(p.text))
             out.append("\n")
-            out.append(f" 体感 {d.feels}°  湿 {d.humidity}%", theme.hexc(p.dim))
+            out.append(f" 体感{d.feels}° 湿{d.humidity}%", theme.hexc(p.dim))
             out.append("\n")
             for day in d.days[:2]:
                 out.append(f" {day.label} {day.hi}/{day.lo}°", theme.hexc(p.dim))
@@ -287,7 +288,7 @@ class WeatherPanel(Widget):
 
         out.append(" 风 ", theme.hexc(p.dim))
         out.append(f"{wind_dir(d.wind_deg)} {d.wind_kmph}km/h", theme.hexc(p.text))
-        out.append("   气压 ", theme.hexc(p.dim))
+        out.append("  气压 ", theme.hexc(p.dim))
         out.append(f"{d.pressure}", theme.hexc(p.text))
         out.append("\n")
 
