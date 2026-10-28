@@ -293,7 +293,7 @@ def _hex(rgb: np.ndarray) -> str:
     key = (int(rgb[0]) << 16) | (int(rgb[1]) << 8) | int(rgb[2])
     s = _HEX.get(key)
     if s is None:
-        if len(_HEX) > 20000:  # long-running dashboards can see thousands of shades
+        if len(_HEX) > 8192:  # long-running dashboards can see thousands of shades
             _HEX.clear()
         s = f"#{key:06x}"
         _HEX[key] = s
@@ -306,7 +306,7 @@ def _style(fg: int, bg: int) -> Style:
     if st is None:
         st = Style(color=Color.from_rgb((fg >> 16) & 255, (fg >> 8) & 255, fg & 255),
                    bgcolor=Color.from_rgb((bg >> 16) & 255, (bg >> 8) & 255, bg & 255))
-        if len(_STYLE) > 50000:  # a dashboard can run for weeks: keep the cache bounded
+        if len(_STYLE) > 8192:  # a dashboard can run for weeks: keep the cache bounded
             _STYLE.clear()
         _STYLE[key] = st
     return st
@@ -480,5 +480,6 @@ class Globe(Widget):
                                labels=labels)
         self._frame_ms = (time.perf_counter() - start) * 1000
         return result
+
 
 
