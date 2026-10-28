@@ -72,6 +72,15 @@ uv run cyberdeck
 NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.config/cyberdeck`，
 天气缓存走 `$XDG_CACHE_HOME/cyberdeck` 或 `~/.cache/cyberdeck`。
 
+音乐卡可选依赖 `playerctl`（MPRIS），装上后会自动读取当前播放器：
+
+```bash
+sudo apt install playerctl        # Debian / Ubuntu
+sudo dnf install playerctl        # Fedora
+```
+
+没有安装时音乐卡显示「未在播放」，不影响其他模块。
+
 ## 布局随窗口变化
 
 | 窗口 | 右栏 |
@@ -155,13 +164,13 @@ NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.c
 | 逐时 | 未来 8 小时温度/天气 + 温度曲线 | wttr.in 缓存 |
 | NET | 延迟/抖动/丢包 + AQI/PM2.5 | TCP 握手 + Open-Meteo |
 | stocks | 上证/深证/个股（`sh`/`sz`/`us` 前缀） | 腾讯行情 |
-| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）；macOS 控制 Music / Spotify；Linux 显示「未在播放」 |
+| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）；macOS 控制 Music / Spotify；Linux 走 `playerctl`（未安装则显示「未在播放」） |
 | todo | 待办清单 | `todo_file` 或各平台数据目录下的 `todo.txt` |
 | notes | 自由便签（任意文本，最多 10 行） | `notes_file` 或各平台数据目录下的 `notes.txt` |
 
 - `modules` 里删掉某一项即可隐藏该模块；想加行情就把代码写进 `stocks`（如 `us.AAPL`、`hk.HSIC`）。
 - 待办文件格式：每行一条，`[ ]` 未完成、`[x]` 已完成，`#` 开头是注释。
-- 网络类模块失败只显示 `--`，不会卡界面；`media` 在没有 winrt（Windows 以外）时：macOS 走 AppleScript 读取 Music / Spotify，Linux 显示「未在播放」。
+- 网络类模块失败只显示 `--`，不会卡界面；`media` 在没有 winrt（Windows 以外）时：macOS 走 AppleScript 读取 Music / Spotify，Linux 走 `playerctl`（可选，未安装时显示「未在播放」）。
 - macOS 首次读取 Music / Spotify 时，系统会请求「自动化」权限；拒绝后音乐卡保持未播放，不影响其他模块。Spotify 会尝试拉取专辑封面，Music.app 只显示文字信息。
 
 ## 性能
@@ -245,3 +254,7 @@ uv run python tools/make_preview.py    # Windows → docs/preview.png；macOS �
 `tools/preview_dash.py` 会按平台自动挑选等宽字体 / 中文字体（macOS 用 Menlo + 冬青黑体，
 Windows 用 Consolas + 黑体，Linux 用 DejaVu Sans Mono + Noto CJK）。
 
+
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。

@@ -38,11 +38,13 @@ except Exception:  # pragma: no cover - optional dependency
 
 IS_WIN = False
 IS_MAC = False
+IS_LINUX = False
 try:
     import sys
 
     IS_WIN = sys.platform == "win32"
     IS_MAC = sys.platform == "darwin"
+    IS_LINUX = sys.platform.startswith("linux")
 except Exception:  # pragma: no cover
     pass
 
@@ -490,9 +492,63 @@ def fetch_mac_media() -> Media | None:
     return found[0]
 
 
+def parse_linux_media(text: str) -> Media | None:
+    """Parse `playerctl` output; position/length are in microseconds."""
+    lines = [line.strip() for line in text.strip().splitlines()]
+    if len(lines) < 6 or not lines[0]:
+        return None
+    title, artist, album, pos, dur, state = lines[:6]
+
+    def seconds(raw: str) -> float:
+        try:
+            return max(0.0, float(raw)) / 1_000_000.0
+        except ValueError:
+            return 0.0  # some players report an empty length
+
+    position = seconds(pos)
+    duration = seconds(dur)
+    if duration > 0:
+        position = min(position, duration)
+    return Media(
+        title=title,
+        artist=artist,
+        playing=state.lower() == "playing",
+        position=position,
+        duration=duration,
+        album=album,
+        cover=None,
+        stamp=time.monotonic(),
+    )
+
+
+def fetch_linux_media() -> Media | None:
+    """Now playing via `playerctl` when installed; silently skip otherwise."""
+    exe = shutil.which("playerctl")
+    if not exe:
+        return None
+    fmt = "{{title}}\n{{artist}}\n{{album}}\n{{position}}\n{{mpris:length}}\n{{status}}"
+    try:
+        proc = subprocess.run(
+            [exe, "metadata", "--format", fmt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=4,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return parse_linux_media(proc.stdout)
+
+
 def fetch_media() -> Media | None:
     if IS_MAC:
         return fetch_mac_media()
+    if IS_LINUX:
+        return fetch_linux_media()
     if not IS_WIN:
         return None
     try:

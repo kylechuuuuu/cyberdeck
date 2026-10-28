@@ -439,3 +439,28 @@ def test_album_art_renders():
     panel.state.media = Media("Song", "Artist", True, 12.0, 227.0, "Album", buf.getvalue(), time.monotonic())
     text = panel.build(50, 30).plain
     assert "Song" in text and "▀" in text
+
+
+def test_parse_linux_media():
+    from cyberdeck.extras import parse_linux_media
+
+    media = parse_linux_media("Song\nArtist\nAlbum\n12500000\n227000000\nPlaying\n")
+    assert media is not None
+    assert (media.title, media.artist, media.album) == ("Song", "Artist", "Album")
+    assert media.playing and media.position == 12.5 and media.duration == 227.0
+
+    paused = parse_linux_media("Song\nArtist\nAlbum\n0\n\nPaused\n")
+    assert paused is not None and not paused.playing and paused.duration == 0.0
+    assert parse_linux_media("") is None
+    assert parse_linux_media("only a title") is None
+
+
+def test_version_matches_pyproject():
+    import tomllib
+    from pathlib import Path
+
+    from cyberdeck import __version__
+
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["version"] == __version__
