@@ -476,3 +476,71 @@ def test_mac_storage_locations():
     config = storage.data_path("config.json")
     assert weather is not None and "Library/Caches/cyberdeck" in str(weather)
     assert config is not None and "Library/Application Support/cyberdeck" in str(config)
+
+
+def test_parse_mac_media():
+    from cyberdeck.extras import parse_mac_media
+
+    media = parse_mac_media("Song\nArtist\nAlbum\n12.5\n227\nplaying\n")
+    assert media is not None
+    assert (media.title, media.artist, media.album) == ("Song", "Artist", "Album")
+    assert media.playing and media.position == 12.5 and media.duration == 227.0
+
+    spotify = parse_mac_media("Song\nArtist\nAlbum\n12.5\n227000\npaused\n", duration_ms=True)
+    assert spotify is not None and spotify.duration == 227.0 and not spotify.playing
+    assert parse_mac_media("") is None
+    assert parse_mac_media("title\nartist\nalbum\nbad\ntime\nplaying") is None
+
+
+def test_album_art_renders():
+    import io
+
+    from PIL import Image
+
+    from cyberdeck.extras import Media
+
+    panel = InfoPanel({"info": {"modules": ["media"], "zones": ["UTC"]}})
+    buf = io.BytesIO()
+    Image.new("RGB", (24, 24), (200, 30, 90)).save(buf, "PNG")
+    panel.state.media = Media("Song", "Artist", True, 12.0, 227.0, "Album", buf.getvalue(), time.monotonic())
+    text = panel.build(50, 30).plain
+    assert "Song" in text and "▀" in text
+
+
+def test_parse_linux_media():
+    from cyberdeck.extras import parse_linux_media
+
+    media = parse_linux_media("Song\nArtist\nAlbum\n12500000\n227000000\nPlaying\n")
+    assert media is not None
+    assert (media.title, media.artist, media.album) == ("Song", "Artist", "Album")
+    assert media.playing and media.position == 12.5 and media.duration == 227.0
+
+    paused = parse_linux_media("Song\nArtist\nAlbum\n0\n\nPaused\n")
+    assert paused is not None and not paused.playing and paused.duration == 0.0
+    assert parse_linux_media("") is None
+    assert parse_linux_media("only a title") is None
+
+
+def test_version_matches_pyproject():
+    import tomllib
+    from pathlib import Path
+
+    from cyberdeck import __version__
+
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["version"] == __version__
+
+
+def test_globe_fps_and_pause():
+    from cyberdeck.app import CyberDeck
+    from cyberdeck.globe import Globe
+
+    assert Globe(fps=99).fps == 30
+    assert Globe(fps=0).fps == 1
+    assert CyberDeck(fps="bad").fps == 8  # type: ignore[arg-type]
+
+    globe = Globe(fps=8, paused=True)
+    yaw = globe.yaw
+    globe._tick()
+    assert globe.yaw == yaw

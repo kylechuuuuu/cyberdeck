@@ -10,7 +10,9 @@ import contextlib
 import json
 import math
 import re
+import shutil
 import socket
+import subprocess
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -35,10 +37,14 @@ except Exception:  # pragma: no cover - optional dependency
     HAS_LUNAR = False
 
 IS_WIN = False
+IS_MAC = False
+IS_LINUX = False
 try:
     import sys
 
     IS_WIN = sys.platform == "win32"
+    IS_MAC = sys.platform == "darwin"
+    IS_LINUX = sys.platform.startswith("linux")
 except Exception:  # pragma: no cover
     pass
 
@@ -317,9 +323,23 @@ def location_marker() -> tuple[float, float, str] | None:
     return _location()
 
 
+_WEATHER_RAW: tuple[float, dict | None] = (-1.0, None)
+
+
 def _weather_raw() -> dict | None:
-    blob = storage.load_json("weather.json")
-    return blob.get("raw") if blob else None
+    """Cached wttr.in payload; re-read only when weather.json changes."""
+    global _WEATHER_RAW
+    path = storage.data_path("weather.json")
+    if path is None:
+        return None
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    if mtime != _WEATHER_RAW[0]:
+        blob = storage.load_json("weather.json")
+        _WEATHER_RAW = (mtime, blob.get("raw") if blob else None)
+    return _WEATHER_RAW[1]
 
 
 # --------------------------------------------------------------------------
@@ -377,7 +397,199 @@ def fetch_air(lat: float, lon: float) -> Air | None:
         return None
 
 
+def parse_mac_media(text: str, duration_ms: bool = False) -> Media | None:
+    """Parse `osascript` output: title, artist, album, position, duration, state."""
+    lines = [line.strip() for line in text.strip().splitlines()]
+    if len(lines) < 6 or not lines[0]:
+        return None
+    title, artist, album, pos, dur, state = lines[:6]
+    try:
+        position = max(0.0, float(pos.replace(",", ".")))
+        duration = max(0.0, float(dur.replace(",", ".")))
+    except ValueError:
+        return None
+    if duration_ms and duration > 1000:  # Spotify reports milliseconds
+        duration /= 1000.0
+    if duration > 0:
+        position = min(position, duration)
+    return Media(
+        title=title,
+        artist=artist,
+        playing=state.lower() == "playing",
+        position=position,
+        duration=duration,
+        album=album,
+        cover=None,
+        stamp=time.monotonic(),
+    )
+
+
+_MAC_COVERS: dict[str, bytes] = {}
+
+_MAC_MUSIC_SCRIPT = """
+if application "Music" is running then
+  tell application "Music"
+    if player state is not stopped then
+      set tr to current track
+      return (name of tr) & linefeed & (artist of tr) & linefeed & (album of tr) & linefeed & (player position as string) & linefeed & (duration of tr as string) & linefeed & (player state as string)
+    end if
+  end tell
+end if
+return ""
+"""
+
+_MAC_SPOTIFY_SCRIPT = """
+if application "Spotify" is running then
+  tell application "Spotify"
+    if player state is not stopped then
+      set tr to current track
+      set art to ""
+      try
+        set art to artwork url of tr
+      end try
+      return (name of tr) & linefeed & (artist of tr) & linefeed & (album of tr) & linefeed & (player position as string) & linefeed & (duration of tr as string) & linefeed & (player state as string) & linefeed & art
+    end if
+  end tell
+end if
+return ""
+"""
+
+
+def _download_cover(url: str, limit: int = 800_000) -> bytes | None:
+    if not url.lower().startswith(("http://", "https://")):
+        return None
+    if url in _MAC_COVERS:
+        return _MAC_COVERS[url]
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "cyberdeck/0.2"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = resp.read(limit + 1)
+    except Exception:
+        return None
+    if not data or len(data) > limit:
+        return None
+    if len(_MAC_COVERS) > 8:
+        _MAC_COVERS.clear()
+    _MAC_COVERS[url] = data
+    return data
+
+
+def fetch_mac_media() -> Media | None:
+    """Now playing from Music.app / Spotify via AppleScript (no extra tools)."""
+    exe = shutil.which("osascript")
+    if not exe:
+        return None
+    players = [
+        ("Spotify", ("/Applications/Spotify.app", str(Path.home() / "Applications" / "Spotify.app")), True, True),
+        ("Music", ("/System/Applications/Music.app", "/Applications/Music.app"), False, False),
+    ]
+    found: list[Media] = []
+    for _name, paths, duration_ms, has_art in players:
+        if not any(Path(path).exists() for path in paths):
+            continue
+        script = _MAC_SPOTIFY_SCRIPT if has_art else _MAC_MUSIC_SCRIPT
+        try:
+            proc = subprocess.run(
+                [exe, "-e", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=4,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode != 0 and has_art:  # older Spotify dictionaries may not have `artwork url`
+            fallback = _MAC_MUSIC_SCRIPT.replace('"Music"', '"Spotify"')
+            try:
+                proc = subprocess.run(
+                    [exe, "-e", fallback],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=4,
+                    check=False,
+                )
+                has_art = False
+            except (OSError, subprocess.SubprocessError):
+                continue
+        if proc.returncode != 0 or not proc.stdout.strip():
+            continue
+        media = parse_mac_media(proc.stdout, duration_ms)
+        if media is None:
+            continue
+        if has_art:
+            lines = proc.stdout.strip().splitlines()
+            if len(lines) > 6:
+                media.cover = _download_cover(lines[6].strip())
+        found.append(media)
+    if not found:
+        return None
+    for media in found:
+        if media.playing:
+            return media
+    return found[0]
+
+
+def parse_linux_media(text: str) -> Media | None:
+    """Parse `playerctl` output; position/length are in microseconds."""
+    lines = [line.strip() for line in text.strip().splitlines()]
+    if len(lines) < 6 or not lines[0]:
+        return None
+    title, artist, album, pos, dur, state = lines[:6]
+
+    def seconds(raw: str) -> float:
+        try:
+            return max(0.0, float(raw)) / 1_000_000.0
+        except ValueError:
+            return 0.0  # some players report an empty length
+
+    position = seconds(pos)
+    duration = seconds(dur)
+    if duration > 0:
+        position = min(position, duration)
+    return Media(
+        title=title,
+        artist=artist,
+        playing=state.lower() == "playing",
+        position=position,
+        duration=duration,
+        album=album,
+        cover=None,
+        stamp=time.monotonic(),
+    )
+
+
+def fetch_linux_media() -> Media | None:
+    """Now playing via `playerctl` when installed; silently skip otherwise."""
+    exe = shutil.which("playerctl")
+    if not exe:
+        return None
+    fmt = "{{title}}\n{{artist}}\n{{album}}\n{{position}}\n{{mpris:length}}\n{{status}}"
+    try:
+        proc = subprocess.run(
+            [exe, "metadata", "--format", fmt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=4,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return parse_linux_media(proc.stdout)
+
+
 def fetch_media() -> Media | None:
+    if IS_MAC:
+        return fetch_mac_media()
+    if IS_LINUX:
+        return fetch_linux_media()
     if not IS_WIN:
         return None
     try:
@@ -472,6 +684,9 @@ class InfoPanel(Widget):
         self._hourly: list[tuple[str, int, int]] = []
         self._todo_mtime = 0.0
         self._notes_mtime = 0.0
+        self._raw_weather: dict | None = None
+        self._hourly_hour = -1
+        self._last_minute = -1
         self._cover_cache: tuple[int, list[Text]] | None = None
         self._quotes_at = 0.0  # last successful market fetch, for the staleness hint
 
@@ -489,21 +704,35 @@ class InfoPanel(Widget):
 
     # -- data ------------------------------------------------------------
     def _tick(self) -> None:
+        changed = False
+        now = datetime.now()
         raw = _weather_raw()
-        if raw:
-            self._hourly = parse_hourly(raw, datetime.now(), 8)
+        if raw is not None and (raw is not self._raw_weather or now.hour != self._hourly_hour):
+            self._raw_weather = raw
+            self._hourly_hour = now.hour
+            hourly = parse_hourly(raw, now, 8)
+            if hourly != self._hourly:
+                self._hourly = hourly
+                changed = True
         if self.state.air is None and time.monotonic() - self._last_air > 30:
             self._last_air = time.monotonic()
             self._poll_air()
-        self._load_todo()
-        self.refresh()
+        if self._load_todo():
+            changed = True
+        # the column only needs a repaint when a clock digit / progress bar moves,
+        # or once a second while the music progress bar is running
+        playing = bool(self.state.media and self.state.media.playing)
+        if changed or playing or now.minute != self._last_minute:
+            self._last_minute = now.minute
+            self.refresh()
 
     def _todo_file(self) -> Path | None:
         if self.todo_path:
             return self.todo_path
         return storage.data_path("todo.txt")
 
-    def _load_todo(self) -> None:
+    def _load_todo(self) -> bool:
+        changed = False
         path = self._todo_file()
         mtime = 0.0
         if path is not None:
@@ -513,6 +742,7 @@ class InfoPanel(Widget):
                 mtime = 0.0
         if mtime != self._todo_mtime:
             self._todo_mtime = mtime
+            changed = True
             if path is None or not path.exists():
                 self.state.todo = []
             else:
@@ -530,6 +760,7 @@ class InfoPanel(Widget):
                 ntime = 0.0
         if ntime != self._notes_mtime:
             self._notes_mtime = ntime
+            changed = True
             if notes is None or not notes.exists():
                 self.state.notes = []
             else:
@@ -538,6 +769,7 @@ class InfoPanel(Widget):
                 except OSError:
                     text = ""
                 self.state.notes = [line.strip() for line in text.splitlines() if line.strip()][:12]
+        return changed
 
     def _notes_file(self) -> Path | None:
         if self.notes_path:

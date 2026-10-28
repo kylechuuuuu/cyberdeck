@@ -56,5 +56,15 @@ svg = fix_svg_text(svg)  # Textual counts CJK as one cell; give them two
 png = bytes(resvg_py.svg_to_bytes(
     svg, width=1920, monospace_family=FONT, sans_serif_family=CJK,
 ))
-(ROOT / "docs" / "preview.png").write_bytes(png)
-print("wrote docs/preview.png", len(png), "bytes")
+import argparse  # noqa: E402
+
+parser = argparse.ArgumentParser(description="Render the README screenshot")
+default_out = "docs/preview-macos.png" if sys.platform == "darwin" else "docs/preview.png"
+parser.add_argument("--out", default=default_out, help="output PNG (relative to repo root)")
+args = parser.parse_args()
+out_path = Path(args.out)
+if not out_path.is_absolute():
+    out_path = ROOT / out_path
+out_path.parent.mkdir(parents=True, exist_ok=True)
+out_path.write_bytes(png)
+print("wrote", out_path.relative_to(ROOT), len(png), "bytes")

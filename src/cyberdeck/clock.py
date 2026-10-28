@@ -21,7 +21,7 @@ class ClockPanel(Widget):
     """
 
     def on_mount(self) -> None:
-        self.set_interval(0.2, self.refresh)
+        self.set_interval(1.0, self.refresh)
 
     # ------------------------------------------------------------------
     def build(self, w: int, h: int) -> Text:

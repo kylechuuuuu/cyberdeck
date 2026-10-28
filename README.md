@@ -1,5 +1,7 @@
 # cyberdeck
 
+**中文** | [English](README.en.md)
+
 终端里的赛博控制台：左边是时钟 / 月历 / 天气 / 旋转地球，右边是 btop 风格的机器监控，
 全屏时再多一列「时间 / 农历 / 逐时 / 网络质量 / 自选（行情·音乐·待办）」。
 
@@ -7,6 +9,8 @@
 Apple GPU（IOKit，无需 sudo）、APFS 卷、热降频 / 内存压力和电池状态。
 
 ![preview](docs/preview.png)
+
+macOS 实机预览：[docs/preview-macos.png](docs/preview-macos.png)（Apple M5 / ioreg GPU / P-E 核心）
 
 ```
 ┌ CYBERDECK ──────────────────────────────────────────────────────────────────┐
@@ -42,6 +46,33 @@ uv run cyberdeck --city Hangzhou
 CYBERDECK_CITY=Shanghai uv run cyberdeck
 ```
 
+常驻 / 低功耗：
+
+```bash
+uv run cyberdeck --fps 5      # 常驻推荐
+uv run cyberdeck --still      # 地球静止，CPU 最低（界面里也可按 space 暂停）
+```
+
+`--fps` 也可以写进 `config.json` 的 `"fps": 5`，下次启动自动生效。
+
+## 常驻看板
+
+macOS 下建议用 tmux 挂后台，关掉终端或 SSH 断开都不影响：
+
+```bash
+brew install tmux
+tmux new -d -s deck 'cd ~/Desktop/cyberdeck && ./run.sh --fps 5'
+tmux attach -t deck        # 随时切回；离开按 ctrl+b 再按 d
+```
+
+- `run.sh` 会把参数原样传给 `cyberdeck`。
+- 需要崩溃后自动重启：
+  `tmux new -d -s deck 'cd ~/Desktop/cyberdeck && while :; do ./run.sh --fps 5; [ $? -eq 0 ] && break; sleep 2; done'`
+  （正常按 `q` 退出是 0，不会重启；崩溃才会重来。）
+- 插电常亮：`caffeinate -dis ./run.sh --fps 5`；`-d` 会阻止显示器休眠，只想后台跑可改成 `-i`。
+- 开机自启：把 `run.command` 加到「系统设置 → 通用 → 登录项」，或在登录时用 launchd 创建上面的 tmux 会话。
+- 远程查看：SSH 进去 `tmux attach -t deck` 即可，不需要额外端口。
+
 ## Windows 运行
 
 ```powershell
@@ -70,6 +101,15 @@ uv run cyberdeck
 NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.config/cyberdeck`，
 天气缓存走 `$XDG_CACHE_HOME/cyberdeck` 或 `~/.cache/cyberdeck`。
 
+音乐卡可选依赖 `playerctl`（MPRIS），装上后会自动读取当前播放器：
+
+```bash
+sudo apt install playerctl        # Debian / Ubuntu
+sudo dnf install playerctl        # Fedora
+```
+
+没有安装时音乐卡显示「未在播放」，不影响其他模块。
+
 ## 布局随窗口变化
 
 | 窗口 | 右栏 |
@@ -85,7 +125,7 @@ NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.c
 | --- | --- |
 | `q` / `ctrl+c` | 退出 |
 | `r` | 立即刷新天气 |
-| `space` | 暂停 / 继续地球自转 |
+| `space` | 暂停 / 继续地球自转（暂停后不再重绘，最省电） |
 | `+` / `-` | 加快 / 减慢自转（macOS 上 `+` 即 `shift` + `=`） |
 | `t` | 循环切换主题 |
 | `1` … `8` | 直接选择主题 |
@@ -153,7 +193,7 @@ Register-ScheduledTask -TaskName cyberdeck -Action $act `
 - 关掉显示器休眠再挂：`powercfg /change monitor-timeout-ac 0`（插电时），否则屏幕会先黑
 - 内存是否稳定：`uv run python tools/soak.py --seconds 180`，正常是平的，末尾三分之一持续上涨才算泄漏
 - 网络断了不会崩：行情/天气/AQI 各自失败只影响自己那块，保留上一次的数据
-- 地球自转约 11 ms/帧（10 fps ≈ 单核 11%），想更省电可以按 `space` 暂停，暂停后降到 4 fps
+- 地球默认 8 fps（约 11 ms/帧，单核 ~9%），`--fps 1..30` 可调，`--still` 直接定格（CPU ~4%）；运行中按 `space` 暂停自转，暂停后完全不重绘
 
 
 ## 主题
@@ -196,25 +236,33 @@ Register-ScheduledTask -TaskName cyberdeck -Action $act `
 | 逐时 | 未来 8 小时温度/天气 + 温度曲线 | wttr.in 缓存 |
 | NET | 延迟/抖动/丢包 + AQI/PM2.5 | TCP 握手 + Open-Meteo |
 | stocks | 上证/深证/个股（`sh`/`sz`/`us` 前缀） | 腾讯行情 |
-| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）+ Pillow；macOS / Linux 显示「未在播放」 |
+| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）；macOS 控制 Music / Spotify；Linux 走 `playerctl`（未安装则显示「未在播放」） |
 | todo | 待办清单 | `todo_file` 或各平台数据目录下的 `todo.txt` |
 | notes | 自由便签（任意文本，最多 10 行） | `notes_file` 或各平台数据目录下的 `notes.txt` |
 
 - `modules` 里删掉某一项即可隐藏该模块；想加行情就把代码写进 `stocks`（如 `us.AAPL`、`hk.HSIC`）。
 - 待办文件格式：每行一条，`[ ]` 未完成、`[x]` 已完成，`#` 开头是注释。
-- 网络类模块失败只显示 `--`，不会卡界面；`media` 在非 Windows 或缺少 winrt 时自动隐藏内容。
+- 网络类模块失败只显示 `--`，不会卡界面；`media` 在没有 winrt（Windows 以外）时：macOS 走 AppleScript 读取 Music / Spotify，Linux 走 `playerctl`（可选，未安装时显示「未在播放」）。
+- macOS 首次读取 Music / Spotify 时，系统会请求「自动化」权限；拒绝后音乐卡保持未播放，不影响其他模块。Spotify 会尝试拉取专辑封面，Music.app 只显示文字信息。
 
 ## 性能
 
 屏幕越大越吃资源，所以做了几层控制：
 
-- **地球**：目标 10 fps（单帧 > 13 ms 自动降到 7 fps，暂停后 4 fps 只保留星光闪烁）；颜色量化到 4 bit 并把连续同色像素合并，单帧 span 从 ~3400 降到 ~1800，Text 构建 9 ms → 3 ms；一帧总耗时约 10 ms。
+- **地球**：默认 8 fps（`--fps 1..30`），暂停后不再重绘；颜色量化到 4 bit 并把连续同色像素合并，单帧 span 从 ~3400 降到 ~1800，Text 构建 9 ms → 3 ms。
+- **按需重绘**：时钟 1 s；信息栏只在分钟变化、待办/笔记/行情/媒体变化时重绘；播放音乐时进度条才按 1 s 刷新；按 mtime 读取天气缓存与待办文件。
 - **采样分层**：CPU/内存 1 s，GPU/进程 4 s，ACPI 温度 60 s，行情 60 s，天气 15 min，AQI 10 min，媒体 10 s，延迟 5 s。
-- **按需 IO**：待办/笔记文件按 mtime 读取；配置只在改动时写。
 - **窄窗口**：右栏回落单列，只保留必要的区块；窗口小于 110×30 直接只显示提示。
 - **macOS**：GPU 走一次约 10 ms 的 `ioreg`，CPU 降频 / 内存压力每 8 秒读一次；不需要 sudo，也不跑常驻轮询。
 
-如果还想更省电，把 `globe.py` 里的 `target = 1 / 10` 改成 `1 / 6` 即可。
+在 Apple M5、160×44 窗口下实测（单核百分比，应用本身）：
+
+| 模式 | CPU | 说明 |
+| --- | --- | --- |
+| 默认 8 fps | ~23% | 动画顺滑 |
+| `--fps 5` | ~16% | 常驻推荐，仍有明显自转 |
+| `--fps 4` | ~13% | 更省电，轻微跳帧 |
+| `--still` | ~4% | 地球静止，适合纯看板 |
 
 ## 硬件数据来源
 
@@ -259,14 +307,17 @@ src/cyberdeck/
   weather.py         wttr.in 客户端 + 天气卡片
   system.py          psutil / nvidia-smi / IOKit 采样 + 自适应硬件面板 + 进程表
   extras.py          信息栏：时间进度/农历/逐时/延迟/AQI/行情/音乐/待办
-  editor.py          终端内股票 / 待办编辑器
+  editor.py          终端内股票 / 定位 / 待办编辑器
+  geo.py             由系统时区推城市、手动坐标解析
   storage.py         跨平台配置/缓存路径探测
   bigfont.py         5 行像素数字字体
   data/landmask.npz  预烘陆地掩膜
 tools/
   build_landmask.py  重新生成陆地掩膜
   make_preview.py    生成 README 截图（Textual 截图 + resvg）
+  make_editor_preview.py  生成编辑器弹窗截图
   preview_dash.py    把各面板光栅化成 PNG（开发用）
+  soak.py            长跑内存浸泡测试
   smoke.py           无头挂载 + 按键冒烟测试
 tests/test_core.py   投影、解析、排版、主题、信息栏、进程表单测
 ```
@@ -279,9 +330,13 @@ uv run pytest -q
 uv run ruff check src tests tools
 uv run python tools/build_landmask.py   # 重新下载海岸线并烘焙掩膜
 uv run python tools/smoke.py           # 无头跑一遍，导出 SVG 截图
-uv run python tools/make_preview.py    # 重新生成 docs/preview.png
+uv run python tools/make_preview.py    # Windows → docs/preview.png；macOS → docs/preview-macos.png
 ```
 
 `tools/preview_dash.py` 会按平台自动挑选等宽字体 / 中文字体（macOS 用 Menlo + 冬青黑体，
 Windows 用 Consolas + 黑体，Linux 用 DejaVu Sans Mono + Noto CJK）。
 
+
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。
