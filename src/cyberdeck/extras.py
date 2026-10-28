@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import numpy as np
 from rich.text import Text
 from textual import work
 from textual.widget import Widget
@@ -284,6 +285,9 @@ class Media:
     playing: bool
     position: float = 0.0
     duration: float = 0.0
+    album: str = ""
+    cover: bytes | None = None
+    stamp: float = 0.0
 
 
 def fetch_stocks(symbols: list[str]) -> list[Quote]:
@@ -332,12 +336,31 @@ def fetch_media() -> Media | None:
         timeline = session.get_timeline_properties()
         position = getattr(timeline, "position", None)
         end = getattr(timeline, "end_time", None)
+        cover: bytes | None = None
+        try:
+            ref = props.thumbnail
+            if ref is not None:
+                stream = await ref.open_read_async()
+                size = int(stream.size)
+                if 0 < size <= 800_000:
+                    from winrt.windows.storage.streams import DataReader
+
+                    reader = DataReader(stream)
+                    await reader.load_async(size)
+                    buffer = bytearray(size)
+                    reader.read_bytes(buffer)
+                    cover = bytes(buffer)
+        except Exception:
+            cover = None
         return Media(
             props.title or "",
             props.artist or "",
             int(status) == 4,
             position.total_seconds() if position else 0.0,
             end.total_seconds() if end else 0.0,
+            props.album_title or "",
+            cover,
+            time.monotonic(),
         )
 
     try:
@@ -388,6 +411,7 @@ class InfoPanel(Widget):
         self._hourly: list[tuple[str, int, int]] = []
         self._todo_mtime = 0.0
         self._notes_mtime = 0.0
+        self._cover_cache: tuple[int, list[Text]] | None = None
 
     def on_mount(self) -> None:
         self._load_todo()
@@ -675,8 +699,9 @@ class InfoPanel(Widget):
             return []
         c = self._style()
         m = self.state.media
+        playing = bool(m and m.playing)
         bars = "▁▂▃▄▅▆▇█"
-        if m and m.playing:
+        if playing:
             now = time.monotonic()
             eq = "".join(bars[1 + int((math.sin(now * 3.1 + i * 1.27) + 1) * 3)] for i in range(5))
         else:
@@ -685,43 +710,104 @@ class InfoPanel(Widget):
         head = Text(no_wrap=True, end="")
         head.append("◤ ", c["cyan"])
         head.append("音乐", f"bold {c['cyan']}")
-        head.append("   " + eq, c["mag"] if m and m.playing else c["dim"])
+        head.append("  " + eq, c["mag"] if playing else c["dim"])
         if m:
-            head.append("  ▶" if m.playing else "  ❚❚", c["dim"])
-        lines = [head]
-
+            head.append("   ▶" if playing else "   ❚❚", c["dim"])
         if not m or not m.title:
-            lines.append(Text(" 未在播放", style=c["dim"]))
-            return lines
+            return [head, Text(" 未在播放", style=c["dim"])]
+
+        art_w = 12 if w >= 40 and m.cover else 0
+        text_w = max(10, w - art_w - (3 if art_w else 0))
 
         title = m.title
-        avail = max(6, w - 3)
-        if len(title) > avail and m.playing:
+        if len(title) > text_w - 3 and playing:
             padded = title + "   "
             offset = int(time.monotonic() * 4) % len(padded)
-            title = (padded + padded)[offset:offset + avail]
-        row = Text(no_wrap=True, end="")
-        row.append(" ♪ ", c["mag"] if m.playing else c["dim"])
-        row.append(title[:avail], f"bold {c['text']}")
-        lines.append(row)
+            title = (padded + padded)[offset:offset + text_w - 3]
 
+        rows: list[Text] = []
+        line = Text(no_wrap=True, end="")
+        line.append(" ♪ ", c["mag"] if playing else c["dim"])
+        line.append(title[: text_w - 3], f"bold {c['text']}")
+        rows.append(line)
         if m.artist:
             artist = Text(no_wrap=True, end="")
-            artist.append("   " + m.artist[: max(4, w - 4)], c["dim"])
-            lines.append(artist)
+            artist.append("   " + m.artist[: text_w - 3], c["dim"])
+            rows.append(artist)
+        if m.album and m.album != m.title:
+            album = Text(no_wrap=True, end="")
+            album.append("   " + m.album[: text_w - 3], c["dim"])
+            rows.append(album)
 
+        pos = self._position(m)
         if m.duration > 1:
-            ratio = max(0.0, min(1.0, m.position / m.duration))
-            bar_w = max(6, w - 18)
+            ratio = max(0.0, min(1.0, pos / m.duration))
+            bar_w = max(8, text_w - 14)
+            filled = int(round(ratio * (bar_w - 1)))
             progress = Text(no_wrap=True, end="")
-            progress.append(" ")
-            for ch, color in theme.gauge(ratio, bar_w, [theme.P.red, theme.P.magenta],
-                                         filled="▰", empty="▱"):
-                progress.append(ch, color)
-            pos = int(m.position)
-            dur = int(m.duration)
-            progress.append(f" {pos // 60}:{pos % 60:02d}/{dur // 60}:{dur % 60:02d}", c["dim"])
-            lines.append(progress)
+            progress.append("   ")
+            for i in range(bar_w):
+                if i < filled:
+                    progress.append("━", theme.hexc(theme.ramp([theme.P.red, theme.P.magenta],
+                                                               i / max(1, bar_w - 1))))
+                elif i == filled:
+                    progress.append("●", f"bold {theme.hexc(theme.P.magenta)}")
+                else:
+                    progress.append("─", theme.hexc(theme.mix(theme.P.dim, theme.P.panel, 0.5)))
+            progress.append(f" {int(pos) // 60}:{int(pos) % 60:02d}", c["text"])
+            progress.append(f"/{int(m.duration) // 60}:{int(m.duration) % 60:02d}", c["dim"])
+            rows.append(progress)
+
+        out = [head]
+        art = self._cover_lines(m, art_w, min(5, max(3, len(rows)))) if art_w else []
+        for i in range(max(len(rows), len(art))):
+            line = Text(no_wrap=True, end="")
+            if art:
+                line.append(" ")
+                if i < len(art):
+                    line.append_text(art[i])
+                else:
+                    line.append(" " * art_w)
+                line.append("  ")
+            if i < len(rows):
+                line.append_text(rows[i])
+            out.append(line)
+        return out
+
+    def _position(self, media: Media) -> float:
+        pos = media.position
+        if media.playing and media.stamp:
+            pos += max(0.0, time.monotonic() - media.stamp)
+        if media.duration > 0:
+            pos = min(pos, media.duration)
+        return pos
+
+    def _cover_lines(self, media: Media, w: int, h: int) -> list[Text]:
+        if not media.cover:
+            return []
+        key = hash(media.cover)
+        if self._cover_cache is not None and self._cover_cache[0] == key:
+            return self._cover_cache[1]
+        lines: list[Text] = []
+        try:
+            import io
+
+            from PIL import Image, ImageOps
+
+            with Image.open(io.BytesIO(media.cover)) as img:
+                rgb = img.convert("RGB")
+                rgb = ImageOps.fit(rgb, (w, h * 2), method=Image.LANCZOS, centering=(0.5, 0.5))
+                px = np.asarray(rgb, dtype=np.uint8)
+            for y in range(h):
+                line = Text(no_wrap=True, end="")
+                for x in range(w):
+                    fg = "#{:02x}{:02x}{:02x}".format(*(int(v) for v in px[y * 2, x]))
+                    bg = "#{:02x}{:02x}{:02x}".format(*(int(v) for v in px[y * 2 + 1, x]))
+                    line.append("▀", f"{fg} on {bg}")
+                lines.append(line)
+        except Exception:
+            lines = []
+        self._cover_cache = (key, lines)
         return lines
 
     def _sec_custom(self, w: int) -> list[Text]:
@@ -771,6 +857,7 @@ class InfoPanel(Widget):
             row.append(text[: max(4, w - 4)], c["text"])
             lines.append(row)
         return lines
+
 
 
 

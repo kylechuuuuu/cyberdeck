@@ -116,7 +116,7 @@ $env:CYBERDECK_CITY = "Shanghai"; uv run cyberdeck
 | 逐时 | 未来 8 小时温度/天气 + 温度曲线 | wttr.in 缓存 |
 | NET | 延迟/抖动/丢包 + AQI/PM2.5 | TCP 握手 + Open-Meteo |
 | stocks | 上证/深证/个股（`sh`/`sz`/`us` 前缀） | 腾讯行情 |
-| media | 正在播放：律动条 + 标题 + 歌手 + 进度条 | Windows 媒体会话（winrt） |
+| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）+ Pillow |
 | todo | 待办清单 | `todo_file` 或 `%LOCALAPPDATA%\cyberdeck\todo.txt` |
 | notes | 自由便签（任意文本，最多 10 行） | `notes_file` 或 `%LOCALAPPDATA%\cyberdeck\notes.txt` |
 
