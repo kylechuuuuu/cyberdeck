@@ -86,6 +86,12 @@ tmux attach -t deck        # come back any time; leave with ctrl+b then d
 
 ## Running on Windows
 
+No Python needed: download `cyberdeck-<version>-win64.zip` from
+[Releases](https://github.com/kylechuuuuu/cyberdeck/releases), unzip it and double-click
+`cyberdeck.exe` (self-contained; the first launch unpacks for a few seconds).
+
+From source:
+
 ```powershell
 cd C:\Users\kyle\Desktop\cyberdeck
 uv run cyberdeck

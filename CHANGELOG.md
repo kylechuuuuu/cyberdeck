@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-10-28
 
 ### 定位
 
@@ -20,6 +20,7 @@
 
 - 新增英文 README（`README.en.md`），中英双向互链
 - 修掉 Textual SVG 导出把 CJK 记为 1 格导致的截图重叠（`tools/svgfix.py`），两张截图重新生成
+- 发布 Windows 免安装包：`cyberdeck-<版本>-win64.zip`（PyInstaller 单文件，无需 Python），构建脚本在 `packaging/build_windows.ps1`
 
 ## 0.2.0 — 2026-10-28
 

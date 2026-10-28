@@ -8,3 +8,6 @@ dist/
 *.egg-info/
 tools/*.png
 tools/*.svg
+
+build/
+*.spec

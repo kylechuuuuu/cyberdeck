@@ -1,6 +1,6 @@
 [project]
 name = "cyberdeck"
-version = "0.2.0"
+version = "0.2.1"
 description = "Terminal dashboard: clock, calendar, weather, spinning Earth, system monitor"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,4 +53,5 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "SIM", "BLE"]
 ignore = ["E501", "BLE001", "RUF012"]
+
 

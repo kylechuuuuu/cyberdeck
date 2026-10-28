@@ -75,6 +75,11 @@ tmux attach -t deck        # 随时切回；离开按 ctrl+b 再按 d
 
 ## Windows 运行
 
+不想装 Python：到 [Releases](https://github.com/kylechuuuuu/cyberdeck/releases) 下载
+`cyberdeck-<版本>-win64.zip`，解压后双击 `cyberdeck.exe` 即可（自包含，首次启动会解包几秒）。
+
+从源码跑：
+
 ```powershell
 cd C:\Users\kyle\Desktop\cyberdeck
 uv run cyberdeck
