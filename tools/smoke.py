@@ -80,5 +80,21 @@ async def main() -> None:
         print("narrow panel:", narrow.query_one(SystemPanel).size)
         (OUT / "shot_narrow.svg").write_text(narrow.export_screenshot(), encoding="utf-8")
 
+    from cyberdeck.extras import InfoPanel
+
+    wide = CyberDeck()
+    async with wide.run_test(size=(240, 55)) as pilot:
+        await pilot.pause(7.0)
+        info = wide.query_one(InfoPanel)
+        print("info:", info.display, info.size, "lat:", round(info.state.latency[-1], 1) if info.state.latency else None,
+              "quotes:", len(info.state.quotes), "air:", info.state.air)
+        (OUT / "shot_full.svg").write_text(wide.export_screenshot(), encoding="utf-8")
+        await pilot.press("i")
+        await pilot.pause(0.5)
+        print("info after i:", info.display, "cfg:", wide.config.get("info", {}).get("enabled"))
+        await pilot.press("i")
+        await pilot.pause(0.3)
+        print("info restored:", info.display)
+
 
 asyncio.run(main())

@@ -14,8 +14,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cyberdeck import bigfont, theme  # noqa: E402
 from cyberdeck.clock import ClockPanel  # noqa: E402
+from cyberdeck.extras import (  # noqa: E402
+    Air,
+    InfoPanel,
+    Quote,
+    moon_phase,
+    parse_hourly,
+    parse_stocks,
+    time_progress,
+    todo_lines,
+)
 from cyberdeck.globe import EarthTexture, GlobeEngine, image_to_text  # noqa: E402
-from cyberdeck.system import Sampler, SystemPanel  # noqa: E402
+from cyberdeck.system import Proc, Sampler, SystemPanel  # noqa: E402
 from cyberdeck.weather import (  # noqa: E402
     Weather,
     WeatherPanel,
@@ -187,8 +197,6 @@ def test_storage_roundtrip():
 
 
 def test_process_table_sorting_and_layout():
-    from cyberdeck.system import Proc
-
     sampler = Sampler()
     sampler.state.procs = [
         Proc("alpha", 10, 5.0, 100),
@@ -210,5 +218,61 @@ def test_process_table_sorting_and_layout():
     narrow = panel.build(63, 32).plain
     assert "PROC" in narrow and "MEM" in narrow
     assert all(theme_width(line) <= 86 for line in wide.split("\n"))
+
+
+def test_time_progress_and_moon():
+    from datetime import datetime
+
+    items = time_progress(datetime(2026, 10, 28, 12, 0))
+    assert [label for label, _, _ in items] == ["今日", "本周", "本月", "今年"]
+    assert abs(items[0][1] - 0.5) < 0.01
+    assert all(0 <= frac <= 1 for _, frac, _ in items)
+    name, illum = moon_phase(datetime(2026, 10, 28, 12, 0))
+    assert name in ("新月", "娥眉月", "上弦月", "盈凸月", "满月", "亏凸月", "下弦月", "残月")
+    assert 0 <= illum <= 1
+
+
+def test_parse_stocks_and_todo():
+    fields = ["0"] * 50
+    fields[1] = "贵州茅台"
+    fields[3] = "1340.00"
+    fields[4] = "1350.00"
+    fields[32] = "-0.74"
+    text = 'v_sh600519="' + "~".join(fields) + '";'
+    quotes = parse_stocks(text)
+    assert quotes and quotes[0][0] == "贵州茅台"
+    assert quotes[0][1] == "1340.00"
+    assert abs(quotes[0][2] + 0.74) < 0.01
+
+    todo = todo_lines("# header\n- [ ] 写论文\n[x] 跑实验\n- 买咖啡\n")
+    assert todo == [("写论文", False), ("跑实验", True), ("买咖啡", False)]
+
+
+def test_parse_hourly_skips_past_hours():
+    from datetime import datetime
+
+    raw = {"weather": [{"hourly": [
+        {"time": "0", "tempC": "10", "weatherCode": "113"},
+        {"time": "1200", "tempC": "20", "weatherCode": "116"},
+        {"time": "1800", "tempC": "15", "weatherCode": "119"},
+    ]}]}
+    out = parse_hourly(raw, datetime(2026, 10, 28, 13, 0), 4)
+    assert [label for label, _, _ in out] == ["18时"]
+    assert out[0][1] == 15
+
+
+def test_info_panel_builds():
+    panel = InfoPanel({"info": {"modules": ["stocks", "media", "todo"], "stocks": [], "zones": ["UTC"]}})
+    panel.state.latency = [12.0, 30.0, 18.0]
+    panel.state.air = Air(79, 8)
+    panel.state.quotes = [Quote("上证指数", "3658.38", 0.28), Quote("贵州茅台", "1341.30", -1.08)]
+    panel.state.todo = [("写论文", False), ("跑实验", True)]
+    panel._hourly = [("12时", 18, 113), ("15时", 17, 116)]
+    text = panel.build(43, 53).plain
+    assert "TIME" in text and "LUNAR" in text and "NET" in text
+    assert "上证指数" in text and "18ms" in text
+    assert "AQI" in text and "写论文" in text
+    # a narrow column must not raise
+    panel.build(24, 10)
 
 

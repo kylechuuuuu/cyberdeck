@@ -457,6 +457,8 @@ class SystemPanel(Widget):
 
     # -- rendering ------------------------------------------------------
     def build(self, w: int, h: int) -> Text:
+        if h >= 48 and w >= 70:
+            return self._top_bottom(w, h)
         if w >= 80 and h >= 26:
             return self._two_columns(w, h)
         return self._one_column(w, h)
@@ -467,6 +469,28 @@ class SystemPanel(Widget):
             return Text("")
         return self.build(w, h)
 
+    def _top_bottom(self, w: int, h: int) -> Text:
+        """Tall screens: hardware cards on top, full-width process table below."""
+        col = (w - 3) // 2
+        sections = [
+            ("cpu", self._sec_cpu(col)),
+            ("mem", self._sec_mem(col)),
+            ("sys", self._sec_sys(col)),
+            ("net", self._sec_net(col)),
+            ("gpu", self._sec_gpu(col)),
+            ("disk", self._sec_disk(col)),
+        ]
+        left: list[Text] = []
+        right: list[Text] = []
+        for _, block in sections:
+            if len(left) <= len(right):
+                left += block + [Text("")]
+            else:
+                right += block + [Text("")]
+        top = self._merge_columns(left, right, col, 3)
+        table = self._sec_proc(w, rows=max(6, h - len(top) - 2))
+        return self._finish(top + [Text("")] + table, h)
+
     def _two_columns(self, w: int, h: int) -> Text:
         gap = 3
         col = (w - gap) // 2
@@ -474,7 +498,8 @@ class SystemPanel(Widget):
             self._sec_disk(col) + [Text("")] + self._sec_sys(col)
         right = self._sec_gpu(col) + [Text("")] + self._sec_net(col) + [Text("")] + \
             self._sec_proc(col, rows=max(6, h - 24))
-        return self._join_columns(left, right, col, gap, h)
+        return self._finish(self._merge_columns(left, right, col, gap), h)
+
     def _one_column(self, w: int, h: int) -> Text:
         proc_rows = max(5, min(10, h - 22))
         proc_block = self._sec_proc(w, rows=proc_rows)
@@ -486,21 +511,27 @@ class SystemPanel(Widget):
                 break
             lines += block + [Text("")]
         lines += proc_block
-        return self._join_columns(lines, [], w, 0, h)
+        return self._finish(lines, h)
 
-    def _join_columns(self, left: list[Text], right: list[Text], col: int, gap: int, h: int) -> Text:
+    def _finish(self, lines: list[Text], h: int) -> Text:
         out = Text(no_wrap=True, end="")
-        sep = Text(" │ ", style=theme.hexc(theme.mix(theme.P.dim, theme.P.bg, 0.4)))
-        total = max(len(left), len(right))
-        for i in range(total):
+        for i, line in enumerate(lines):
             if i >= h:
                 break
-            out.append_text(self._pad(left[i] if i < len(left) else Text(""), col))
-            if right:
-                out.append_text(sep)
-                out.append_text(self._pad(right[i] if i < len(right) else Text(""), col))
+            out.append_text(line)
             out.append("\n")
         return out
+
+    def _merge_columns(self, left: list[Text], right: list[Text], col: int, gap: int) -> list[Text]:
+        sep = Text(" │ ", style=theme.hexc(theme.mix(theme.P.dim, theme.P.bg, 0.4)))
+        rows: list[Text] = []
+        for i in range(max(len(left), len(right))):
+            row = self._pad(left[i] if i < len(left) else Text(""), col)
+            if right:
+                row.append_text(sep)
+                row.append_text(self._pad(right[i] if i < len(right) else Text(""), col))
+            rows.append(row)
+        return rows
 
     @staticmethod
     def _pad(text: Text, width: int) -> Text:

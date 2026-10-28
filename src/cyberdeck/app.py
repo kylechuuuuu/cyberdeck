@@ -16,6 +16,7 @@ from textual.widget import Widget
 
 from . import storage, theme
 from .clock import ClockPanel
+from .extras import InfoPanel
 from .globe import Globe
 from .system import SystemPanel
 from .weather import WeatherPanel
@@ -69,6 +70,7 @@ def hintbar_text() -> Text:
         ("S", "排序"),
         ("K", "结束"),
         ("T", "主题"),
+        ("I", "信息栏"),
     ]
     t.append(" ")
     for key, label in hints:
@@ -99,12 +101,15 @@ class CyberDeck(App):
     Screen { background: #05080f; overflow: hidden; }
     #body { height: 1fr; overflow: hidden; }
     #left { width: 46%; overflow: hidden; }
+    Screen.info #left { width: 40%; }
     #toprow { height: 16; }
     ClockPanel { width: 32; height: 16; padding: 0 1; }
     WeatherPanel { width: 1fr; height: 16; padding: 0 1; }
     Globe { height: 1fr; }
     #left { border-right: solid #16203a; }
     SystemPanel { padding: 0 1; }
+    InfoPanel { width: 46; display: none; border-left: solid #16203a; }
+    Screen.info InfoPanel { display: block; }
     #toosmall { height: 1fr; width: 1fr; content-align: center middle; background: #05080f; }
     """
 
@@ -119,6 +124,7 @@ class CyberDeck(App):
         Binding("plus,equal", "faster", "加速"),
         Binding("minus", "slower", "减速"),
         Binding("t", "cycle_theme", "配色"),
+        Binding("i", "toggle_info", "信息栏"),
         Binding("1", "theme(0)", "主题1", show=False),
         Binding("2", "theme(1)", "主题2", show=False),
         Binding("3", "theme(2)", "主题3", show=False),
@@ -145,6 +151,7 @@ class CyberDeck(App):
                     yield WeatherPanel(city=self.city)
                 yield Globe()
             yield SystemPanel()
+            yield InfoPanel(self.config)
         yield TooSmalMsg(id="toosmall")
         yield HintBar()
 
@@ -160,6 +167,8 @@ class CyberDeck(App):
         small = size.width < self.MIN_WIDTH or size.height < self.MIN_HEIGHT
         self.query_one("#body").display = not small
         self.query_one(TooSmalMsg).display = small
+        enabled = bool(self.config.get("info", {}).get("enabled", True))
+        self.screen.set_class(size.width >= 210 and enabled, "info")
 
     def _apply_theme(self) -> None:
         p = theme.P
@@ -168,7 +177,7 @@ class CyberDeck(App):
             wdg.styles.background = theme.hexc(theme.mix(p.bg, p.cyan, 0.06))
         for wdg in self.query(HintBar):
             wdg.styles.background = theme.hexc(theme.mix(p.bg, p.cyan, 0.06))
-        for cls in (ClockPanel, WeatherPanel, SystemPanel):
+        for cls in (ClockPanel, WeatherPanel, SystemPanel, InfoPanel):
             for wdg in self.query(cls):
                 wdg.styles.background = theme.hexc(p.panel)
         self.query_one("#left").styles.border_right = ("solid", theme.hexc(theme.mix(p.dim, p.bg, 0.35)))
@@ -192,6 +201,12 @@ class CyberDeck(App):
 
     def action_cycle_theme(self) -> None:
         self.action_theme((self.theme_index + 1) % len(theme.PALETTES))
+
+    def action_toggle_info(self) -> None:
+        info = self.config.setdefault("info", {})
+        info["enabled"] = not bool(info.get("enabled", True))
+        self._save_config()
+        self._sync_size(self.size)
 
     def action_theme(self, index: int) -> None:
         self.theme_index = int(index) % len(theme.PALETTES)
