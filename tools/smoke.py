@@ -1,6 +1,7 @@
 """Headless interaction check: sizes, workers, keys, process table, screenshots."""
 
 import asyncio
+import math
 import sys
 from pathlib import Path
 
@@ -96,5 +97,64 @@ async def main() -> None:
         await pilot.pause(0.3)
         print("info restored:", info.display)
 
+    # editor: stocks + todo, then save
+    from textual.widgets import Input, TextArea
+
+    edit = CyberDeck()
+    async with edit.run_test(size=(240, 55)) as pilot:
+        await pilot.pause(5.0)
+        await pilot.press("e")
+        await pilot.pause(0.6)
+        screen = edit.screen
+        print("editor:", type(screen).__name__)
+        screen.query_one("#stocks", Input).value = "sh000001, sz399001, sh600519, us.AAPL"
+        screen.query_one("#todo", TextArea).text = (
+            "- [x] 给地球加定位标注\n"
+            "- [ ] 信息栏布局再优化\n"
+            "- [ ] 写性能基准测试\n"
+        )
+        await pilot.press("ctrl+s")
+        await pilot.pause(0.8)
+        panel = edit.query_one(InfoPanel)
+        print("saved stocks:", panel.stocks, "todo:", panel.state.todo)
+        print("todo file:", panel._todo_file(), panel._todo_file().exists())
+
+    # marker screenshot: face the location, pause, capture
+    shot = CyberDeck()
+    async with shot.run_test(size=(240, 55)) as pilot:
+        await pilot.pause(6.0)
+        globe = shot.query_one("Globe")
+        await pilot.press("space")
+        await pilot.pause(0.4)
+        if globe.marker:
+            lat, lon, name = globe.marker
+            globe.yaw = -math.radians(lon)
+            globe.refresh()
+            await pilot.pause(0.3)
+            print("marker:", name, lat, lon, "visible:", globe.engine.marker_pos is not None)
+        await pilot.press("space")  # resume so the caption shows the spin rate
+        await pilot.pause(0.25)
+        (OUT / "shot_marker.svg").write_text(shot.export_screenshot(), encoding="utf-8")
+
+        import time
+
+        from cyberdeck.globe import image_to_text
+
+        w, h = globe.size.width, globe.size.height
+        marker = (globe.marker[0], globe.marker[1]) if globe.marker else None
+        t0 = time.perf_counter()
+        for _ in range(20):
+            img = globe.engine.render(w, h, globe.yaw, time.time(), marker=marker)
+        eng_ms = (time.perf_counter() - t0) / 20 * 1000
+        t0 = time.perf_counter()
+        for _ in range(20):
+            image_to_text(img, "EARTH", hud=["ORBITAL VIEW"], label=(10, 6, "◉ Tokyo"))
+        txt_ms = (time.perf_counter() - t0) / 20 * 1000
+        t0 = time.perf_counter()
+        for _ in range(20):
+            globe.render()
+        print(f"globe: engine {eng_ms:.2f}ms text {txt_ms:.2f}ms full {(time.perf_counter()-t0)/20*1000:.2f}ms")
+
 
 asyncio.run(main())
+

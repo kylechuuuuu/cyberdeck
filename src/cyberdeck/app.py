@@ -16,7 +16,8 @@ from textual.widget import Widget
 
 from . import storage, theme
 from .clock import ClockPanel
-from .extras import InfoPanel
+from .editor import EditorScreen
+from .extras import InfoPanel, parse_symbols
 from .globe import Globe
 from .system import SystemPanel
 from .weather import WeatherPanel
@@ -71,6 +72,7 @@ def hintbar_text() -> Text:
         ("K", "结束"),
         ("T", "主题"),
         ("I", "信息栏"),
+        ("E", "编辑"),
     ]
     t.append(" ")
     for key, label in hints:
@@ -125,6 +127,7 @@ class CyberDeck(App):
         Binding("minus", "slower", "减速"),
         Binding("t", "cycle_theme", "配色"),
         Binding("i", "toggle_info", "信息栏"),
+        Binding("e", "edit", "编辑"),
         Binding("1", "theme(0)", "主题1", show=False),
         Binding("2", "theme(1)", "主题2", show=False),
         Binding("3", "theme(2)", "主题3", show=False),
@@ -207,6 +210,38 @@ class CyberDeck(App):
         info["enabled"] = not bool(info.get("enabled", True))
         self._save_config()
         self._sync_size(self.size)
+
+    def action_edit(self) -> None:
+        panel = self.query_one(InfoPanel)
+        path = panel._todo_file()
+        text = ""
+        if path is not None and path.exists():
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+        self.push_screen(EditorScreen(panel.stocks, text), self._apply_edit)
+
+    def _apply_edit(self, result: dict | None) -> None:
+        if not result:
+            return
+        panel = self.query_one(InfoPanel)
+        stocks = parse_symbols(result.get("stocks", ""))
+        panel.stocks = stocks
+        self.config.setdefault("info", {})["stocks"] = stocks
+        self._save_config()
+
+        path = panel._todo_file()
+        if path is not None:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(result.get("todo", "").rstrip() + "\n", encoding="utf-8")
+            except OSError:
+                self.notify("待办保存失败", severity="error", timeout=3)
+        panel._load_todo()
+        panel._poll_stocks()
+        panel.refresh()
+        self.notify(f"已保存 · 股票 {len(stocks)} 支", timeout=2)
 
     def action_theme(self, index: int) -> None:
         self.theme_index = int(index) % len(theme.PALETTES)

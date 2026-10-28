@@ -296,7 +296,7 @@ class Sampler:
     # -- slow (every ~2.5 s) ------------------------------------------------
     def slow(self) -> State:
         s = self.state
-        if time.monotonic() - self._slow_t < 1.5:
+        if time.monotonic() - self._slow_t < 2.0:
             return s
         self._slow_t = time.monotonic()
 
@@ -306,7 +306,7 @@ class Sampler:
         if self._disk_models is None:
             self._disk_models = _disk_models()
 
-        if time.monotonic() - self._sensor_t > 5:
+        if time.monotonic() - self._sensor_t > 60:
             self._sensor_t = time.monotonic()
             s.acpi_temp = _acpi_temperature()
 
@@ -393,8 +393,8 @@ class SystemPanel(Widget):
     def on_mount(self) -> None:
         self.sampler.fast()
         self._slow()
-        self.set_interval(0.7, self._fast)
-        self.set_interval(2.5, self._slow)
+        self.set_interval(1.0, self._fast)
+        self.set_interval(4.0, self._slow)
         self.focus()
 
     def _fast(self) -> None:
@@ -799,3 +799,5 @@ class SystemPanel(Widget):
             status.append(" ↑↓ 选择 · S 排序 · K 结束", c["dim"])
         lines.append(status)
         return lines
+
+

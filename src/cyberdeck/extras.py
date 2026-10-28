@@ -138,6 +138,17 @@ def parse_stocks(text: str) -> list[tuple[str, str, float]]:
     return quotes
 
 
+def parse_symbols(text: str) -> list[str]:
+    """Split 'sh600519, us.AAPL' (commas, Chinese commas, spaces) into symbols."""
+    cleaned = text.replace("，", ",").replace("、", ",").replace(";", ",").replace(" ", ",")
+    out: list[str] = []
+    for part in cleaned.split(","):
+        symbol = part.strip()
+        if symbol and symbol not in out:
+            out.append(symbol)
+    return out[:12]
+
+
 def todo_lines(text: str, limit: int = 8) -> list[tuple[str, bool]]:
     out: list[tuple[str, bool]] = []
     for raw in text.splitlines():
@@ -214,7 +225,7 @@ def aqi_level(aqi: float) -> tuple[str, str]:
     return "严重", "red"
 
 
-def _coords_from_weather() -> tuple[float, float] | None:
+def _location() -> tuple[float, float, str] | None:
     blob = storage.load_json("weather.json")
     try:
         area = blob["raw"]["nearest_area"][0]
@@ -223,9 +234,20 @@ def _coords_from_weather() -> tuple[float, float] | None:
             lat = lat[0]["value"]
         if isinstance(lon, list):
             lon = lon[0]["value"]
-        return float(lat), float(lon)
-    except (KeyError, IndexError, TypeError, ValueError):
+        name = area.get("areaName", [{"value": ""}])[0].get("value", "")
+        return float(lat), float(lon), str(name)
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         return None
+
+
+def _coords_from_weather() -> tuple[float, float] | None:
+    loc = _location()
+    return (loc[0], loc[1]) if loc else None
+
+
+def location_marker() -> tuple[float, float, str] | None:
+    """(lat, lon, city name) for the globe marker."""
+    return _location()
 
 
 def _weather_raw() -> dict | None:
@@ -345,13 +367,15 @@ class InfoPanel(Widget):
         self._last_slow = 0.0
         self._last_air = 0.0
         self._hourly: list[tuple[str, int, int]] = []
+        self._todo_mtime = 0.0
+        self._notes_mtime = 0.0
 
     def on_mount(self) -> None:
         self._load_todo()
-        self.set_interval(1.0, self._tick)
-        self.set_interval(3.0, self._poll_latency)
+        self.set_interval(2.0, self._tick)
+        self.set_interval(5.0, self._poll_latency)
         self.set_interval(60.0, self._poll_stocks)
-        self.set_interval(6.0, self._poll_media)
+        self.set_interval(10.0, self._poll_media)
         self.set_interval(600.0, self._poll_air)
         self.set_timer(0.5, self._poll_stocks)
         self.set_timer(0.6, self._poll_media)
@@ -376,22 +400,39 @@ class InfoPanel(Widget):
 
     def _load_todo(self) -> None:
         path = self._todo_file()
-        if path is None or not path.exists():
-            self.state.todo = []
-        else:
+        mtime = 0.0
+        if path is not None:
             try:
-                self.state.todo = todo_lines(path.read_text(encoding="utf-8", errors="replace"), 14)
+                mtime = path.stat().st_mtime
             except OSError:
+                mtime = 0.0
+        if mtime != self._todo_mtime:
+            self._todo_mtime = mtime
+            if path is None or not path.exists():
                 self.state.todo = []
+            else:
+                try:
+                    self.state.todo = todo_lines(path.read_text(encoding="utf-8", errors="replace"), 14)
+                except OSError:
+                    self.state.todo = []
+
         notes = self._notes_file()
-        if notes is None or not notes.exists():
-            self.state.notes = []
-        else:
+        ntime = 0.0
+        if notes is not None:
             try:
-                text = notes.read_text(encoding="utf-8", errors="replace")
+                ntime = notes.stat().st_mtime
             except OSError:
-                text = ""
-            self.state.notes = [line.strip() for line in text.splitlines() if line.strip()][:12]
+                ntime = 0.0
+        if ntime != self._notes_mtime:
+            self._notes_mtime = ntime
+            if notes is None or not notes.exists():
+                self.state.notes = []
+            else:
+                try:
+                    text = notes.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    text = ""
+                self.state.notes = [line.strip() for line in text.splitlines() if line.strip()][:12]
 
     def _notes_file(self) -> Path | None:
         if self.notes_path:
@@ -663,6 +704,8 @@ class InfoPanel(Widget):
             row.append(text[: max(4, w - 4)], c["text"])
             lines.append(row)
         return lines
+
+
 
 
 

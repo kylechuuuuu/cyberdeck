@@ -276,3 +276,29 @@ def test_info_panel_builds():
     panel.build(24, 10)
 
 
+def test_globe_marker():
+    import math
+
+    eng = GlobeEngine()
+    lat, lon = 35.69, 139.69
+    yaw = -math.radians(lon)
+    img = eng.render(60, 24, yaw, 1.0, marker=(lat, lon)).astype(int)
+    assert eng.marker_pos is not None
+    x, y = int(eng.marker_pos[0]), int(eng.marker_pos[1])
+    plain = eng.render(60, 24, yaw, 1.0).astype(int)
+    assert img[y, x].sum() > plain[y, x].sum() + 150  # marker brightens the pixel
+    # the same point is on the far side of the globe a half-turn later
+    eng.render(60, 24, math.radians(180 - lon), 1.0, marker=(lat, lon))
+    assert eng.marker_pos is None
+
+
+def test_parse_symbols():
+    from cyberdeck.extras import parse_symbols
+
+    assert parse_symbols("sh600519, us.AAPL") == ["sh600519", "us.AAPL"]
+    assert parse_symbols("sh600519，sz399001、us.AAPL") == ["sh600519", "sz399001", "us.AAPL"]
+    assert parse_symbols("  sh600519  sh600519 ") == ["sh600519"]
+    assert parse_symbols("") == []
+
+
+

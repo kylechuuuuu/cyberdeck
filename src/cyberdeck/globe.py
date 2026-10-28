@@ -13,6 +13,8 @@ import time
 from importlib import resources
 
 import numpy as np
+from rich.color import Color
+from rich.style import Style
 from rich.text import Text
 from textual.widget import Widget
 
@@ -139,7 +141,37 @@ class GlobeEngine:
         self._grids[key] = g
         return g
 
-    def render(self, w: int, h: int, yaw: float, t: float, tilt: float = TILT) -> np.ndarray:
+    def _project_marker(self, lat: float, lon: float, w: int, h: int, yaw: float, tilt: float):
+        """Screen position of a geographic point, or None when it faces away."""
+        la, lo = math.radians(lat), math.radians(lon)
+        x, y, z = math.cos(la) * math.sin(lo), math.sin(la), math.cos(la) * math.cos(lo)
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        x1, y1, z1 = x * cy + z * sy, y, -x * sy + z * cy
+        ct, st = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
+        y2, z2 = y1 * ct - z1 * st, y1 * st + z1 * ct
+        if z2 <= 0.03:
+            return None
+        r = max(4.0, min(w / 2.0, h * 1.0) * 0.88)
+        return w / 2.0 + r * x1, h - r * y2
+
+    def _draw_marker(self, img: np.ndarray, mx: float, my: float, t: float) -> None:
+        p = theme.P
+        radius = 2.4 + 0.9 * math.sin(t * 2.2)
+        span = 6
+        x0, x1 = max(0, int(mx) - span), min(img.shape[1], int(mx) + span + 1)
+        y0, y1 = max(0, int(my) - span), min(img.shape[0], int(my) + span + 1)
+        if x0 >= x1 or y0 >= y1:
+            return
+        ys, xs = np.mgrid[y0:y1, x0:x1]
+        dist = np.hypot(xs - mx, ys - my)
+        ring = np.exp(-(((dist - radius) / 0.6) ** 2)) * 0.45
+        dot = np.exp(-((dist / 0.8) ** 2)) * 0.70
+        glow = np.exp(-((dist / 2.6) ** 2)) * 0.10
+        weight = np.clip(ring + dot + glow, 0, 1)[..., None]
+        img[y0:y1, x0:x1] += weight * np.array(p.cyan, np.float32)
+
+    def render(self, w: int, h: int, yaw: float, t: float, tilt: float = TILT,
+               marker: tuple[float, float] | None = None) -> np.ndarray:
         g = self._grid(w, h)
         p = theme.P
         nx, ny, nz = g["nx"], g["ny"], g["nz"]
@@ -207,6 +239,13 @@ class GlobeEngine:
         edge = g["edge"]
         img = bg * (1 - edge) + col * edge
         img = img + np.array(p.atmo, np.float32) * g["glow"] * 0.55
+
+        self.marker_pos = None
+        if marker is not None:
+            pos = self._project_marker(marker[0], marker[1], w, h, yaw, tilt)
+            if pos is not None:
+                self.marker_pos = pos
+                self._draw_marker(img, pos[0], pos[1], t)
         return np.clip(img, 0, 255).astype(np.uint8)
 
 
@@ -215,6 +254,7 @@ class GlobeEngine:
 # --------------------------------------------------------------------------
 
 _HEX: dict[int, str] = {}
+_STYLE: dict[int, Style] = {}
 
 
 def _hex(rgb: np.ndarray) -> str:
@@ -226,47 +266,63 @@ def _hex(rgb: np.ndarray) -> str:
     return s
 
 
-def _overlay(row: list[list[str]], text: str, col: int, fg: str, bg: str) -> None:
+def _style(fg: int, bg: int) -> Style:
+    key = (fg << 24) | bg
+    st = _STYLE.get(key)
+    if st is None:
+        st = Style(color=Color.from_rgb((fg >> 16) & 255, (fg >> 8) & 255, fg & 255),
+                   bgcolor=Color.from_rgb((bg >> 16) & 255, (bg >> 8) & 255, bg & 255))
+        _STYLE[key] = st
+    return st
+
+
+def _overlay(chars: np.ndarray, keys: np.ndarray, row: int, col: int, text: str, fg: int, bg: int) -> None:
+    h, w = chars.shape
+    if not 0 <= row < h:
+        return
     for i, ch in enumerate(text):
         j = col + i
-        if 0 <= j < len(row):
-            row[j] = [ch, fg, bg]
+        if 0 <= j < w:
+            chars[row, j] = ch
+            keys[row, j] = (fg << 24) | bg
 
 
-def image_to_text(img: np.ndarray, caption: str | None = None, hud: list[str] | None = None) -> Text:
+def image_to_text(img: np.ndarray, caption: str | None = None, hud: list[str] | None = None,
+                  label: tuple[int, int, str] | None = None) -> Text:
     """Pack an RGB image (2 pixels per cell) into a truecolor half-block Text."""
     ph, w, _ = img.shape
     h = ph // 2
-    top, bot = img[0::2], img[1::2]
-    bg = theme.hexc(theme.P.bg)
-    rows: list[list[list[str]]] = []
-    for y in range(h):
-        row: list[list[str]] = []
-        for x in range(w):
-            row.append(["▀", _hex(top[y, x]), _hex(bot[y, x])])
-        rows.append(row)
+    q = (img.astype(np.uint32) >> 4) << 4
+    packed = (q[..., 0] << 16) | (q[..., 1] << 8) | q[..., 2]
+    top, bot = packed[0::2], packed[1::2]
+    keys = (top.astype(np.uint64) << 24) | bot.astype(np.uint64)
+    chars = np.full((h, w), "▀", dtype="<U1")
+
+    p = theme.P
+    bg = (p.bg[0] << 16) | (p.bg[1] << 8) | p.bg[2]
+    cyan = (p.cyan[0] << 16) | (p.cyan[1] << 8) | p.cyan[2]
 
     if hud:
-        for i, label in enumerate(hud):
+        for i, text in enumerate(hud):
             if i < h - 1:
-                _overlay(rows[i], "  " + label, 0, theme.hexc(theme.P.cyan), bg)
+                _overlay(chars, keys, i, 0, "  " + text, cyan, bg)
     if caption and h:
-        _overlay(rows[-1], caption, 0, theme.hexc(theme.P.cyan), bg)
+        _overlay(chars, keys, h - 1, 0, caption, cyan, bg)
+    if label is not None:
+        col, row, text = label
+        _overlay(chars, keys, row, max(0, col), text, cyan, bg)
 
     out = Text(no_wrap=True, end="")
-    for y, row in enumerate(rows):
-        run = ""
-        run_style = None
-        for ch, fg, bcol in row:
-            style = f"{fg} on {bcol}"
-            if style != run_style:
-                if run:
-                    out.append(run, run_style)
-                run, run_style = "", style
-            run += ch
-        if run:
-            out.append(run, run_style)
-        if y != len(rows) - 1:
+    for y in range(h):
+        row_chars = "".join(chars[y].tolist())
+        row_keys = keys[y]
+        bounds = np.flatnonzero(row_keys[1:] != row_keys[:-1]) + 1
+        start = 0
+        for end in [*bounds.tolist(), w]:
+            key = int(row_keys[start])
+            out.append(row_chars[start:end], _style(key >> 24, key & 0xFFFFFF))
+            start = end
+        if y != h - 1:
             out.append("\n")
     return out
 
@@ -282,19 +338,40 @@ class Globe(Widget):
         super().__init__(**kwargs)
         self.engine = GlobeEngine()
         self.yaw = -1.9
-        self.speed = 0.32
+        self.speed = 0.28
         self.paused = False
+        self.marker: tuple[float, float, str] | None = None
         self._last = time.perf_counter()
+        self._last_draw = 0.0
 
     def on_mount(self) -> None:
-        self.set_interval(1 / 16, self._tick)
+        self.set_interval(1 / 24, self._tick)
+        self.set_interval(30, self._refresh_location)
+        self._refresh_location()
+
+    def _refresh_location(self) -> None:
+        try:
+            from .extras import location_marker
+
+            marker = location_marker()
+        except Exception:
+            marker = None
+        if marker:
+            self.marker = marker
 
     def _tick(self) -> None:
         now = time.perf_counter()
+        # adaptive: aim for 12 fps, but back off to 8 fps when a frame is expensive
+        target = 1 / 10 if getattr(self, "_frame_ms", 0.0) < 13 else 1 / 7
+        if now - self._last_draw < target:
+            return
         dt = min(now - self._last, 0.25)
         self._last = now
         if not self.paused:
             self.yaw = (self.yaw + self.speed * dt) % (2 * math.pi)
+        elif now - self._last_draw < 0.25:
+            return  # paused: only keep the starfield twinkling, at 4 fps
+        self._last_draw = now
         self.refresh()
 
     def action_toggle_spin(self) -> None:
@@ -310,9 +387,27 @@ class Globe(Widget):
         w, h = self.size.width, self.size.height
         if w < 12 or h < 6:
             return Text("地球需要更大的窗口", style=theme.hexc(theme.P.dim))
-        img = self.engine.render(w, h, self.yaw, time.time())
+        start = time.perf_counter()
+        now = time.time()
+        marker_ll = (self.marker[0], self.marker[1]) if self.marker else None
+        img = self.engine.render(w, h, self.yaw, now, marker=marker_ll)
         state = "PAUSED" if self.paused else f"{self.speed:.2f} rad/s"
-        lon = (math.degrees(self.yaw) + 180) % 360 - 180
+        lon = (-math.degrees(self.yaw) + 180) % 360 - 180
         meridian = f"{abs(lon):5.1f}°{'E' if lon >= 0 else 'W'}"
         caption = f" EARTH · TILT {TILT:.1f}° · {state} "
-        return image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"])
+
+        label = None
+        pos = getattr(self.engine, "marker_pos", None)
+        if pos is not None and self.marker:
+            name = "".join(c for c in self.marker[2] if c.isascii() and c.isprintable())[:14] or "HERE"
+            text = f"◉ {name}"
+            cx, cy = int(pos[0]), int(pos[1] // 2) - 1
+            col = cx + 2
+            if col + len(text) >= w - 1:
+                col = max(0, cx - len(text) - 2)
+            label = (col, max(0, min(h - 3, cy)), text)
+
+        result = image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"], label=label)
+        self._frame_ms = (time.perf_counter() - start) * 1000
+        return result
+
