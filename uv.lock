@@ -17,7 +17,7 @@ wheels = [
 
 [[package]]
 name = "cyberdeck"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "lunar-python" },
@@ -679,3 +679,4 @@ sdist = { url = "https://files.pythonhosted.org/packages/71/1c/c64902c94efd14239
 wheels = [
     { url = "https://files.pythonhosted.org/packages/63/69/58254ddbc0ef0e19095e98bfce1cf3df98cf5611098db9147cf428bcd1a8/winrt_windows_storage_streams-4!10.0.28000.2705-py3-none-any.whl", hash = "sha256:2824e516e328c9ba76ffc7926431255b124b4a9f52c656f0b1e0056a7f8ca7b8", size = 18790, upload-time = "2026-10-24T01:32:31.342Z" },
 ]
+

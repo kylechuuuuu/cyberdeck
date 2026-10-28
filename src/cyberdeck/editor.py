@@ -16,6 +16,8 @@ class EditorScreen(ModalScreen[dict | None]):
 
     BINDINGS = [
         Binding("ctrl+s", "save", "保存"),
+        Binding("super+s", "save", "保存", show=False),
+        Binding("f2", "save", "保存", show=False),
         Binding("escape", "cancel", "取消"),
     ]
 
@@ -43,7 +45,7 @@ class EditorScreen(ModalScreen[dict | None]):
             yield Input(self.location, id="location", placeholder="31.2304, 121.4737, Shanghai")
             yield Static("待办 · 每行一条，[x] 已完成", classes="field")
             yield TextArea(self.todo_text, id="todo")
-            yield Static("Ctrl+S 保存 · Esc 取消", id="hint")
+            yield Static("Ctrl+S / F2 保存 · 定位行 Enter 也可 · Esc 取消", id="hint")
 
     def on_mount(self) -> None:
         p = theme.P
@@ -55,6 +57,12 @@ class EditorScreen(ModalScreen[dict | None]):
         for label in self.query('.field'):
             label.styles.color = theme.hexc(p.dim)
         self.query_one("#stocks", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter in the location field saves: macOS terminals often swallow Ctrl+S
+        # for XOFF flow control, so give them a key that always arrives.
+        if event.input.id == "location":
+            self.action_save()
 
     def action_save(self) -> None:
         stocks = self.query_one("#stocks", Input).value

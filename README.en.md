@@ -9,7 +9,8 @@ time progress, the lunar calendar, hourly forecast, network quality and a custom
 
 Runs on **macOS (Apple Silicon / Intel)**, Windows and Linux. On macOS it also reads
 P/E cores, the Apple GPU through IOKit (no sudo), APFS volumes, thermal throttling,
-memory pressure and battery state.
+memory pressure and battery state. Location defaults to the OS timezone and can be
+pinned to exact coordinates from the `e` editor (VPN-safe).
 
 ![preview](docs/preview.png)
 
@@ -165,8 +166,9 @@ One dialog, three things:
 - **Location**: `lat, lon, city` (`30.2741, 120.1551, Hangzhou`); leave it blank to fall back to the timezone
 - **Todo**: one item per line, `[x]` for done, `#` for comments
 
-`Ctrl+S` saves (writes `config.json` and `todo.txt`, and moves the pin and weather city
-immediately), `Esc` cancels. The files can be edited directly too — panels re-read them
+`Ctrl+S` / `F2` saves (writes `config.json` and `todo.txt`, and moves the pin and weather city
+immediately). macOS terminals may swallow `Ctrl+S` as XOFF flow control, so use `F2`, or
+press `Enter` while the location field is focused. `Esc` cancels. The files can be edited directly too — panels re-read them
 on mtime.
 
 ## Globe location pin
@@ -182,7 +184,7 @@ parks on the rim, so you always know where it went.
 Where the coordinates come from:
 
 1. **Manual**: press `e` and fill the location line, or set `location` in `config.json` —
-   exact, applied within 30 seconds
+   exact, applied within 5-10 seconds
 2. **OS timezone** (`China Standard Time` → Shanghai) → wttr.in returns that city's
    station coordinates
 
@@ -199,8 +201,8 @@ machine, not the proxy.
 }
 ```
 
-The globe re-reads this every 30 seconds, and `location` survives a theme switch.
-`name` doubles as the weather city, so one place is enough (`--city` still wins).
+The globe re-reads this every 5 seconds, the weather city follows, and `location` survives a theme switch.
+`name` doubles as the weather city; without it the coordinates are queried directly. Clearing the field returns to the OS timezone (`--city` still wins).
 
 ## Keeping it running (Windows)
 
@@ -223,7 +225,7 @@ Notes for a dashboard that stays up:
 - Check for leaks: `uv run python tools/soak.py --seconds 180` — flat is healthy; only a
   rising last third means something accumulates
 - Network failures stay local: quotes, weather and AQI each keep their last data
-- The Earth runs at 8 fps (~11 ms/frame, ~9% of a core); `--fps 1..30` tunes it, `--still`
+- The Earth runs at 8 fps (roughly 20-25% of one core on an M5, see the table below); `--fps 1..30` tunes it, `--still`
   freezes it (~4%), and `space` pauses with no redraws at all
 
 ## Themes
@@ -299,8 +301,8 @@ Measured on an Apple M5, 160×44 (percent of one core, app only):
 | Mode | CPU | Notes |
 | --- | --- | --- |
 | default 8 fps | ~23% | smooth |
-| `--fps 5` | ~16% | recommended for a permanent dashboard |
-| `--fps 4` | ~13% | lighter, slight stepping |
+| `--fps 5` | ~19% | recommended for a permanent dashboard |
+| `--fps 4` | ~16% | lighter, slight stepping |
 | `--still` | ~4% | frozen Earth, pure dashboard |
 
 ## Where the hardware numbers come from

@@ -1,12 +1,16 @@
 # Changelog
 
-## 0.2.1 — 2026-10-28
+## 0.3.0 — 2026-10-28
 
 ### 定位
 
 - 地球红点改成十字准星：白核 + 呼吸环 + 雷达脉冲 + 四向刻度，alpha 合成保持红色，尺寸随地球缩放
 - 标签带经纬度并按显示宽度裁剪；转到背面时在地球边缘留 `◂ HERE` 箭头
 - 手动定位：`e` 弹窗新增「定位」一行（`纬度, 经度, 城市名`），或直接写 `config.json` 的 `location`
+- 留空会真正回到系统时区：同时从 `config.json` 删掉旧的 `location` / `city`，地球标记立即清除
+- 只填经纬度时直接用坐标查天气；格式错误会保留原定位并给出提示，不会静默清空
+- 运行中手改 `config.json` 的 `location` 也会在 5 秒内同步地球标记和天气城市，不需要重启
+- macOS 上 `Ctrl+S` 常被终端当成 XOFF 流控吞掉：保存新增 `F2` / `Cmd+S`，定位行按 `Enter` 也能保存
 - 默认城市改为按系统时区推断，挂 VPN 不会再被出口 IP 带到东京
 - `location.name` 同时作天气城市；换主题不再覆盖手写的 `location`
 
@@ -21,6 +25,8 @@
 - 新增英文 README（`README.en.md`），中英双向互链
 - 修掉 Textual SVG 导出把 CJK 记为 1 格导致的截图重叠（`tools/svgfix.py`），两张截图重新生成
 - 发布 Windows 免安装包：`cyberdeck-<版本>-win64.zip`（PyInstaller 单文件，无需 Python），构建脚本在 `packaging/build_windows.ps1`
+- macOS 预览图重新生成（手动定位 + 十字准星 + CJK 正确宽度）
+- `tools/smoke.py` 结束时恢复 `config.json` / `todo.txt` / `notes.txt`，不再覆盖本机配置
 
 ## 0.2.0 — 2026-10-28
 
