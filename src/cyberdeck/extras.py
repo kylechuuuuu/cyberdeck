@@ -363,6 +363,9 @@ class InfoPanel(Widget):
         raw = _weather_raw()
         if raw:
             self._hourly = parse_hourly(raw, datetime.now(), 8)
+        if self.state.air is None and time.monotonic() - self._last_air > 30:
+            self._last_air = time.monotonic()
+            self._poll_air()
         self._load_todo()
         self.refresh()
 
@@ -445,7 +448,6 @@ class InfoPanel(Widget):
         if air:
             self.state.air = air
         self.refresh()
-
     # -- rendering -------------------------------------------------------
     def render(self) -> Text:
         w, h = self.content_size
