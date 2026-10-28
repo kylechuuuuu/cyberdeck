@@ -285,6 +285,15 @@ def test_info_panel_builds():
     panel.build(24, 10)
 
 
+def test_stale_quotes_are_labelled():
+    panel = InfoPanel({"info": {"modules": ["stocks"], "zones": ["UTC"]}})
+    panel.state.quotes = [Quote("英伟达", "217.94", -0.9)]
+    panel._quotes_at = time.time() - 600
+    assert "m前" in panel.build(43, 30).plain
+    panel._quotes_at = time.time()
+    assert "m前" not in panel.build(43, 30).plain
+
+
 def test_globe_marker():
     import math
 

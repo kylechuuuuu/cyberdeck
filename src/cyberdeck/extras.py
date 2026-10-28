@@ -472,6 +472,7 @@ class InfoPanel(Widget):
         self._todo_mtime = 0.0
         self._notes_mtime = 0.0
         self._cover_cache: tuple[int, list[Text]] | None = None
+        self._quotes_at = 0.0  # last successful market fetch, for the staleness hint
 
     def on_mount(self) -> None:
         self._load_todo()
@@ -567,6 +568,7 @@ class InfoPanel(Widget):
     def _push_stocks(self, quotes: list[Quote]) -> None:
         if quotes:
             self.state.quotes = quotes
+            self._quotes_at = time.time()
         self.refresh()
 
     @work(thread=True, exclusive=True)
@@ -880,7 +882,11 @@ class InfoPanel(Widget):
     def _sec_custom(self, w: int) -> list[Text]:
         c = self._style()
         mods = [m.upper() for m in self.modules if m != "media"]
-        lines = [self._header("自选", " ".join(mods))]
+        extra = " ".join(mods)
+        age = time.time() - self._quotes_at if self._quotes_at else 0.0
+        if self.state.quotes and age > 180:  # 24/7: say so instead of showing stale numbers
+            extra += f" · {age / 60:.0f}m前"
+        lines = [self._header("自选", extra)]
         if "stocks" in self.modules:
             if self.state.quotes:
                 for q in self.state.quotes[:8]:
