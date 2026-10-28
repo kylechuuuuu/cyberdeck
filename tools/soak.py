@@ -2,7 +2,7 @@
 
     uv run python tools/soak.py --seconds 180
 
-The app is mounted at the full 240x55 layout, all timers (globe 10 fps,
+The app is mounted at the full 240x55 layout, all timers (globe 8 fps,
 process table, clock, info polls) keep running, and resident memory is
 sampled every few seconds. A healthy dashboard plateaus; a rising last
 third means something is accumulating (cache, widget, history).

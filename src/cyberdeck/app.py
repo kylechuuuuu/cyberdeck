@@ -168,11 +168,16 @@ class CyberDeck(App):
         self.title = "CYBERDECK"
         self.config = storage.load_json("config.json") or {}
         pinned = self.config.get("location")
-        pinned_city = pinned.get("name") if isinstance(pinned, dict) else None
-        # --city > config city > pinned coordinates > OS timezone (IP guessing lies behind a VPN)
-        chosen = city or self.config.get("city") or pinned_city
-        self.city = chosen or system_city() or None
-        self._city_pinned = bool(chosen)
+        pin_name = pinned.get("name") if isinstance(pinned, dict) else None
+        cfg_city = self.config.get("city")
+        if cfg_city and pin_name and cfg_city == pin_name:
+            # older builds persisted the pin name as a separate city; the pin owns it now
+            self.config.pop("city", None)
+            cfg_city = None
+        # --city > config city > pinned name > OS timezone (IP guessing lies behind a VPN)
+        self._explicit_city = city or cfg_city
+        self.city = self._explicit_city or pin_name or system_city() or None
+        self._city_pinned = bool(self._explicit_city)
         try:
             self.fps = max(1, min(30, int(fps if fps is not None else self.config.get("fps", 8))))
         except (TypeError, ValueError):
@@ -199,6 +204,7 @@ class CyberDeck(App):
         self._sync_size(self.size)
         self.query_one(SystemPanel).focus()
         self._terminal_hint()
+        self.set_interval(5.0, self._sync_location_config)
 
     def _terminal_hint(self) -> None:
         """Apple Terminal has no truecolor; the Earth looks better in modern terminals."""
@@ -239,6 +245,45 @@ class CyberDeck(App):
         self.query_one("#left").styles.border_right = ("solid", theme.hexc(theme.mix(p.dim, p.bg, 0.35)))
         self.refresh()
 
+    def _weather_city(self) -> str | None:
+        """City for wttr.in: explicit override, else the pin (name or coordinates), else timezone."""
+        if self._explicit_city:
+            return self._explicit_city
+        pinned = self.config.get("location")
+        if isinstance(pinned, dict):
+            name = str(pinned.get("name") or "").strip()
+            if name:
+                return name
+            try:
+                return f"{float(pinned['lat']):.4f},{float(pinned['lon']):.4f}"
+            except (KeyError, TypeError, ValueError):
+                pass
+        return system_city()
+
+    def _apply_weather_city(self, target: str | None) -> None:
+        if target == self.city:
+            return
+        self.city = target
+        panel = self.query_one(WeatherPanel)
+        panel.city = target
+        panel.refresh_weather()
+
+    def _sync_location_config(self) -> None:
+        """Pick up a hand-edited `location` from config.json without a restart."""
+        fresh = storage.load_json("config.json")
+        if fresh is None:
+            return  # missing or mid-write; try again on the next tick
+        if "location" in fresh:
+            if fresh["location"] == self.config.get("location"):
+                return
+            self.config["location"] = fresh["location"]
+        else:
+            if "location" not in self.config:
+                return
+            self.config.pop("location", None)
+        self._apply_weather_city(self._weather_city())
+        self.query_one(Globe)._refresh_location()
+
     def _save_config(self) -> None:
         # merge into what is on disk: a hand-edited "location" must survive a theme switch
         fresh = storage.load_json("config.json") or {}
@@ -246,6 +291,13 @@ class CyberDeck(App):
         fresh["theme"] = theme.P.name
         if self._city_pinned:
             fresh["city"] = self.city
+            self.config["city"] = self.city
+        else:
+            # a pin-derived or timezone-derived city must not linger on disk
+            fresh.pop("city", None)
+            self.config.pop("city", None)
+        if "location" not in self.config:
+            fresh.pop("location", None)
         self.config = fresh
         storage.save_json("config.json", fresh)
 
@@ -293,18 +345,17 @@ class CyberDeck(App):
         self.config.setdefault("info", {})["stocks"] = stocks
 
         # manual pin: "lat, lon, city"; blank falls back to the timezone guess
-        located = parse_location((result.get("location") or "").strip())
-        if located:
+        text = (result.get("location") or "").strip()
+        located = parse_location(text) if text else None
+        if text and located is None:
+            self.notify("定位格式应为：纬度, 经度, 城市名；已保留原定位", severity="warning", timeout=5)
+        elif located:
             lat, lon, name = located
             self.config["location"] = {"lat": round(lat, 4), "lon": round(lon, 4), "name": name}
-            if name and name != self.city:
-                self.city = name
-                self._city_pinned = True
-                weather_panel = self.query_one(WeatherPanel)
-                weather_panel.city = name
-                weather_panel.refresh_weather()
+            self._apply_weather_city(self._weather_city())
         else:
             self.config.pop("location", None)
+            self._apply_weather_city(self._weather_city())
         self._save_config()
 
         path = panel._todo_file()
@@ -330,7 +381,7 @@ class CyberDeck(App):
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cyberdeck", description="Terminal cyberdeck dashboard")
-    parser.add_argument("--city", help="wttr.in location, e.g. Hangzhou (default: auto by IP)")
+    parser.add_argument("--city", help="wttr.in city, e.g. Hangzhou (default: config pin, then OS timezone)")
     parser.add_argument("--fps", type=int, help="Earth animation FPS, 1-30 (default: 8, or config.json)")
     parser.add_argument("--still", action="store_true", help="start with the Earth paused (low power)")
     parser.add_argument("--version", action="version", version=f"cyberdeck {__version__}")

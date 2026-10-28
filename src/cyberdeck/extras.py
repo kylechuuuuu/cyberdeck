@@ -305,7 +305,7 @@ def _location() -> tuple[float, float, str] | None:
         # prefer the city the user asked wttr.in for over the nearest sub-district
         city = str(blob.get("city") or name or "")
         if pinned:
-            return pinned[0], pinned[1], pinned[2] or city
+            return pinned[0], pinned[1], pinned[2] or name or "HERE"
         return float(lat), float(lon), city
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         if pinned:

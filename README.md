@@ -6,7 +6,8 @@
 全屏时再多一列「时间 / 农历 / 逐时 / 网络质量 / 自选（行情·音乐·待办）」。
 
 支持 **macOS（Apple Silicon / Intel）**、Windows 和 Linux。macOS 下会额外读取 P/E 核心、
-Apple GPU（IOKit，无需 sudo）、APFS 卷、热降频 / 内存压力和电池状态。
+Apple GPU（IOKit，无需 sudo）、APFS 卷、热降频 / 内存压力和电池状态。定位默认按系统时区推断，
+也可以在 `e` 里手填经纬度（挂 VPN 也能钉在真实位置）。
 
 ![preview](docs/preview.png)
 
@@ -157,7 +158,7 @@ sudo dnf install playerctl        # Fedora
 
 坐标来源按优先级：
 
-1. **手动定位**：按 `e` 在「定位」一行填 `纬度, 经度, 城市名`，或者直接写 `config.json` 的 `location` —— 精确，30 秒内生效
+1. **手动定位**：按 `e` 在「定位」一行填 `纬度, 经度, 城市名`，或者直接写 `config.json` 的 `location` —— 精确，几秒内生效
 2. **系统时区**推断的城市（`China Standard Time` → Shanghai）→ wttr.in 该城市的气象站坐标
 
 **为什么不用 IP 定位**：开着 VPN 时出口 IP 在东京，IP 地理库就把城市判成东京，天气和地球红点会一起错。系统时区跟着机器走，不受代理影响，所以默认从时区推城市。
@@ -170,8 +171,8 @@ sudo dnf install playerctl        # Fedora
 }
 ```
 
-改完 30 秒内自动生效：地球每 30 秒重读一次定位。`location` 不会因为按 `t` 换主题被覆盖。
-`name` 同时会当作天气城市，所以只写这一处就够了（`--city` 仍然优先）。
+改完 5~10 秒内自动生效：地球每 5 秒重读一次定位，天气城市也会跟着切换。`location` 不会因为按 `t` 换主题被覆盖。
+`name` 同时会当作天气城市；不写 `name` 时直接用经纬度查天气。留空会回到系统时区，`--city` 仍然优先。
 
 ## 常驻运行
 
@@ -193,7 +194,7 @@ Register-ScheduledTask -TaskName cyberdeck -Action $act `
 - 关掉显示器休眠再挂：`powercfg /change monitor-timeout-ac 0`（插电时），否则屏幕会先黑
 - 内存是否稳定：`uv run python tools/soak.py --seconds 180`，正常是平的，末尾三分之一持续上涨才算泄漏
 - 网络断了不会崩：行情/天气/AQI 各自失败只影响自己那块，保留上一次的数据
-- 地球默认 8 fps（约 11 ms/帧，单核 ~9%），`--fps 1..30` 可调，`--still` 直接定格（CPU ~4%）；运行中按 `space` 暂停自转，暂停后完全不重绘
+- 地球默认 8 fps（M5 上单核约 20%~25%，见性能表），`--fps 1..30` 可调，`--still` 直接定格（CPU ~4%）；运行中按 `space` 暂停自转，暂停后完全不重绘
 
 
 ## 主题
@@ -260,8 +261,8 @@ Register-ScheduledTask -TaskName cyberdeck -Action $act `
 | 模式 | CPU | 说明 |
 | --- | --- | --- |
 | 默认 8 fps | ~23% | 动画顺滑 |
-| `--fps 5` | ~16% | 常驻推荐，仍有明显自转 |
-| `--fps 4` | ~13% | 更省电，轻微跳帧 |
+| `--fps 5` | ~19% | 常驻推荐，仍有明显自转 |
+| `--fps 4` | ~16% | 更省电，轻微跳帧 |
 | `--still` | ~4% | 地球静止，适合纯看板 |
 
 ## 硬件数据来源

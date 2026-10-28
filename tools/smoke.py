@@ -9,11 +9,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from textual.geometry import Size  # noqa: E402
 
+from cyberdeck import storage  # noqa: E402
 from cyberdeck.app import CyberDeck  # noqa: E402
 from cyberdeck.system import SystemPanel  # noqa: E402
 from cyberdeck.weather import WeatherPanel  # noqa: E402
 
 OUT = Path(__file__).parent
+
+
+def snapshot_user_files() -> dict[str, tuple[Path | None, bytes | None]]:
+    """Smoke tests press ctrl+s; keep the developer's real config/todo intact."""
+    snap: dict[str, tuple[Path | None, bytes | None]] = {}
+    for name in ("config.json", "todo.txt", "notes.txt"):
+        path = storage.data_path(name)
+        try:
+            data = path.read_bytes() if path is not None and path.exists() else None
+        except OSError:
+            data = None
+        snap[name] = (path, data)
+    return snap
+
+
+def restore_user_files(snap: dict[str, tuple[Path | None, bytes | None]]) -> None:
+    for path, data in snap.values():
+        if path is None:
+            continue
+        try:
+            if data is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(data)
+        except OSError:
+            pass
+
 
 
 async def size_guard() -> None:
@@ -158,5 +186,10 @@ async def main() -> None:
         print(f"globe: engine {eng_ms:.2f}ms text {txt_ms:.2f}ms full {(time.perf_counter()-t0)/20*1000:.2f}ms")
 
 
-asyncio.run(main())
+snap = snapshot_user_files()
+try:
+    asyncio.run(main())
+finally:
+    restore_user_files(snap)
+    print("restored config/todo/notes")
 

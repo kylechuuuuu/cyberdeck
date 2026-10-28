@@ -544,3 +544,38 @@ def test_globe_fps_and_pause():
     yaw = globe.yaw
     globe._tick()
     assert globe.yaw == yaw
+
+
+def test_cleared_location_disappears_from_disk(monkeypatch):
+    from cyberdeck import storage
+    from cyberdeck.app import CyberDeck
+
+    disk = {
+        "theme": "neon",
+        "city": "Hangzhou",
+        "location": {"lat": 30.2741, "lon": 120.1551, "name": "Hangzhou"},
+    }
+    saved: dict = {}
+    monkeypatch.setattr(storage, "load_json", lambda name: dict(disk))
+    monkeypatch.setattr(storage, "save_json", lambda name, payload: saved.update(payload) or True)
+
+    app = CyberDeck()
+    assert app.city == "Hangzhou"
+    assert "city" not in app.config  # the old pin-derived city was migrated away
+
+    app.config.pop("location", None)
+    app._save_config()
+    assert "location" not in saved
+    assert "city" not in saved
+
+
+def test_weather_city_uses_pin_coords(monkeypatch):
+    from cyberdeck import storage
+    from cyberdeck.app import CyberDeck
+
+    monkeypatch.setattr(storage, "load_json", lambda name: {"theme": "neon"})
+    app = CyberDeck()
+    app.config["location"] = {"lat": 30.0, "lon": 120.0, "name": ""}
+    assert app._weather_city() == "30.0000,120.0000"
+    app.config["location"]["name"] = "Hangzhou"
+    assert app._weather_city() == "Hangzhou"
