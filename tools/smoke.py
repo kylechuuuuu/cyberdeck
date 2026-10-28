@@ -148,7 +148,7 @@ async def main() -> None:
         eng_ms = (time.perf_counter() - t0) / 20 * 1000
         t0 = time.perf_counter()
         for _ in range(20):
-            image_to_text(img, "EARTH", hud=["ORBITAL VIEW"], label=(10, 6, "◉ Tokyo"))
+            image_to_text(img, "EARTH", hud=["ORBITAL VIEW"], labels=[(10, 6, "◉ Tokyo", (255, 80, 90))])
         txt_ms = (time.perf_counter() - t0) / 20 * 1000
         t0 = time.perf_counter()
         for _ in range(20):

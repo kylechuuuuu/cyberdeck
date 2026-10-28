@@ -292,13 +292,41 @@ def test_globe_marker():
     lat, lon = 35.69, 139.69
     yaw = -math.radians(lon)
     img = eng.render(60, 24, yaw, 1.0, marker=(lat, lon)).astype(int)
-    assert eng.marker_pos is not None
+    assert eng.marker_pos is not None and eng.marker_far is None
     x, y = int(eng.marker_pos[0]), int(eng.marker_pos[1])
     plain = eng.render(60, 24, yaw, 1.0).astype(int)
     assert img[y, x].sum() > plain[y, x].sum() + 150  # marker brightens the pixel
     # the same point is on the far side of the globe a half-turn later
     eng.render(60, 24, math.radians(180 - lon), 1.0, marker=(lat, lon))
     assert eng.marker_pos is None
+    assert eng.marker_far is not None  # widget parks a chevron on the limb
+
+
+def test_configured_location_wins(monkeypatch):
+    from cyberdeck import storage
+    from cyberdeck.extras import _location
+
+    def fake_load(name):
+        return {"location": {"lat": 31.2304, "lon": 121.4737, "name": "Shanghai"}} \
+            if name == "config.json" else None
+
+    monkeypatch.setattr(storage, "load_json", fake_load)
+    lat, lon, name = _location()
+    assert (round(lat, 3), round(lon, 3), name) == (31.230, 121.474, "Shanghai")
+
+    # a broken pin falls back to the weather station instead of crashing
+    monkeypatch.setattr(storage, "load_json", lambda name: {"location": {"lat": "nope"}})
+    assert _location() is None
+
+
+def test_location_clamps_longitude(monkeypatch):
+    from cyberdeck import storage
+    from cyberdeck.extras import _location
+
+    monkeypatch.setattr(storage, "load_json",
+                        lambda name: {"location": {"lat": 10.0, "lon": 190.0}})
+    lat, lon, name = _location()
+    assert lat == 10.0 and -180.0 <= lon < 180.0 and name == "HERE"
 
 
 def test_parse_symbols():

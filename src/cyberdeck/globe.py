@@ -13,6 +13,7 @@ import time
 from importlib import resources
 
 import numpy as np
+from rich.cells import cell_len
 from rich.color import Color
 from rich.style import Style
 from rich.text import Text
@@ -103,6 +104,8 @@ class GlobeEngine:
     def __init__(self, texture: EarthTexture | None = None) -> None:
         self.tex = texture or EarthTexture.load()
         self._grids: dict[tuple[int, int], dict[str, np.ndarray]] = {}
+        self.marker_pos: tuple[float, float] | None = None
+        self.marker_far: tuple[float, float] | None = None
 
     def _grid(self, w: int, h: int) -> dict[str, np.ndarray]:
         key = (w, h)
@@ -142,39 +145,58 @@ class GlobeEngine:
         return g
 
     def _project_marker(self, lat: float, lon: float, w: int, h: int, yaw: float, tilt: float):
-        """Screen position of a geographic point, or None when it faces away."""
+        """Screen position of a geographic point plus its depth (z2 > 0 = facing us)."""
         la, lo = math.radians(lat), math.radians(lon)
         x, y, z = math.cos(la) * math.sin(lo), math.sin(la), math.cos(la) * math.cos(lo)
         cy, sy = math.cos(yaw), math.sin(yaw)
         x1, y1, z1 = x * cy + z * sy, y, -x * sy + z * cy
         ct, st = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
         y2, z2 = y1 * ct - z1 * st, y1 * st + z1 * ct
-        if z2 <= 0.03:
-            return None
         r = max(4.0, min(w / 2.0, h * 1.0) * 0.88)
-        return w / 2.0 + r * x1, h - r * y2
+        return w / 2.0 + r * x1, h - r * y2, z2
 
     def _draw_marker(self, img: np.ndarray, mx: float, my: float, t: float) -> None:
         p = theme.P
-        radius = 2.3 + 0.8 * math.sin(t * 2.2)
-        span = 7
+        ph, pw = img.shape[0], img.shape[1]
+        radius = max(4.0, min(pw / 2.0, ph / 2.0) * 0.88)
+        k = max(0.85, min(1.45, radius / 35.0))  # keep the pin proportional on small globes
+        span = int(9 * k) + 1
         x0, x1 = max(0, int(mx) - span), min(img.shape[1], int(mx) + span + 1)
         y0, y1 = max(0, int(my) - span), min(img.shape[0], int(my) + span + 1)
         if x0 >= x1 or y0 >= y1:
             return
         ys, xs = np.mgrid[y0:y1, x0:x1]
-        dist = np.hypot(xs - mx, ys - my)
+        dx, dy = xs - mx, ys - my
+        dist = np.hypot(dx, dy)
+        ang = np.arctan2(dy, dx)
         patch = img[y0:y1, x0:x1]
-        # darken a small disc first so the pin stays readable over bright land
-        shade = np.exp(-((dist / 2.7) ** 2)) * 0.55
-        patch *= (1 - shade[..., None])
-        ring = np.exp(-(((dist - radius) / 0.65) ** 2)) * 0.75
-        dot = np.exp(-((dist / 0.85) ** 2)) * 0.95
-        glow = np.exp(-((dist / 2.4) ** 2)) * 0.12
-        weight = np.clip(ring + dot + glow, 0, 1)[..., None]
-        patch += weight * np.array(p.red, np.float32)
-        core = np.exp(-((dist / 0.45) ** 2))[..., None] * 0.35
-        patch += core * np.array((255, 235, 235), np.float32)
+
+        # dark cushion first: the pin has to read on ice, desert and bright ocean alike
+        patch *= (1 - 0.55 * np.exp(-((dist / (2.6 * k)) ** 2)))[..., None]
+
+        red = np.array(p.red, np.float32)
+        pulse = 0.5 + 0.5 * math.sin(t * 2.6)
+        # radar sweep: a ring that keeps expanding and fading out
+        ping_p = (t * 0.45) % 1.0
+
+        alpha = np.exp(-((dist / (1.05 * k)) ** 2))                                  # filled core
+        alpha = np.maximum(alpha, np.exp(-(((dist - (2.7 + 0.5 * pulse) * k) / (0.45 * k)) ** 2)))
+        alpha = np.maximum(alpha, np.exp(-(((dist - (1.2 + 7.5 * ping_p) * k) / (0.7 * k)) ** 2))
+                           * (1 - ping_p) ** 2 * 0.55)
+
+        # four tick marks read as a reticle instead of a red blob
+        tick = np.zeros_like(dist)
+        for a in (0.0, math.pi / 2, math.pi, 1.5 * math.pi):
+            delta = np.abs(np.arctan2(np.sin(ang - a), np.cos(ang - a)))
+            tick = np.maximum(tick, np.exp(-((delta / 0.30) ** 2)))
+        tick *= (np.clip((dist - 3.6 * k) / (0.9 * k), 0, 1)
+                 * np.clip((5.6 * k - dist) / (0.9 * k), 0, 1))
+        alpha = np.maximum(alpha, tick * 0.8)
+
+        # alpha-composite, so the pin keeps its hue instead of washing out to white
+        patch[:] = patch * (1 - alpha[..., None]) + red * alpha[..., None]
+        core = np.exp(-((dist / (0.42 * k)) ** 2))[..., None] * 0.85
+        patch[:] = patch * (1 - core) + np.array((255, 242, 242), np.float32) * core
 
     def render(self, w: int, h: int, yaw: float, t: float, tilt: float = TILT,
                marker: tuple[float, float] | None = None) -> np.ndarray:
@@ -247,11 +269,15 @@ class GlobeEngine:
         img = img + np.array(p.atmo, np.float32) * g["glow"] * 0.55
 
         self.marker_pos = None
+        self.marker_far = None
         if marker is not None:
-            pos = self._project_marker(marker[0], marker[1], w, h, yaw, tilt)
-            if pos is not None:
-                self.marker_pos = pos
-                self._draw_marker(img, pos[0], pos[1], t)
+            mx, my, mz = self._project_marker(marker[0], marker[1], w, h, yaw, tilt)
+            if mz > 0.03:
+                self.marker_pos = (mx, my)
+                self._draw_marker(img, mx, my, t)
+            else:
+                # behind the limb: the widget draws a rim chevron pointing at it
+                self.marker_far = (mx, my)
         return np.clip(img, 0, 255).astype(np.uint8)
 
 
@@ -280,6 +306,8 @@ def _style(fg: int, bg: int) -> Style:
     if st is None:
         st = Style(color=Color.from_rgb((fg >> 16) & 255, (fg >> 8) & 255, fg & 255),
                    bgcolor=Color.from_rgb((bg >> 16) & 255, (bg >> 8) & 255, bg & 255))
+        if len(_STYLE) > 50000:  # a dashboard can run for weeks: keep the cache bounded
+            _STYLE.clear()
         _STYLE[key] = st
     return st
 
@@ -296,8 +324,7 @@ def _overlay(chars: np.ndarray, keys: np.ndarray, row: int, col: int, text: str,
 
 
 def image_to_text(img: np.ndarray, caption: str | None = None, hud: list[str] | None = None,
-                  label: tuple[int, int, str] | None = None,
-                  label_color: tuple[int, int, int] | None = None) -> Text:
+                  labels: list[tuple[int, int, str, tuple[int, int, int]]] | None = None) -> Text:
     """Pack an RGB image (2 pixels per cell) into a truecolor half-block Text."""
     ph, w, _ = img.shape
     h = ph // 2
@@ -317,11 +344,10 @@ def image_to_text(img: np.ndarray, caption: str | None = None, hud: list[str] | 
                 _overlay(chars, keys, i, 0, "  " + text, cyan, bg)
     if caption and h:
         _overlay(chars, keys, h - 1, 0, caption, cyan, bg)
-    if label is not None:
-        col, row, text = label
-        tone = label_color or p.cyan
-        _overlay(chars, keys, row, max(0, col), text,
-                 (tone[0] << 16) | (tone[1] << 8) | tone[2], bg)
+    if labels:
+        for col, row, text, tone in labels:
+            _overlay(chars, keys, row, max(0, col), text,
+                     (tone[0] << 16) | (tone[1] << 8) | tone[2], bg)
 
     out = Text(no_wrap=True, end="")
     for y in range(h):
@@ -407,18 +433,47 @@ class Globe(Widget):
         meridian = f"{abs(lon):5.1f}°{'E' if lon >= 0 else 'W'}"
         caption = f" EARTH · TILT {TILT:.1f}° · {state} "
 
-        label = None
+        labels: list[tuple[int, int, str, tuple[int, int, int]]] = []
         pos = getattr(self.engine, "marker_pos", None)
-        if pos is not None and self.marker:
-            name = "".join(c for c in self.marker[2] if c.isascii() and c.isprintable())[:14] or "HERE"
-            text = f"◉ {name} "
+        far = getattr(self.engine, "marker_far", None)
+        if self.marker and pos is not None:
+            lat, lon, city = self.marker
+            name = "".join(ch for ch in city if ch.isascii() and ch.isprintable())[:14] or "HERE"
+            coord = f"{abs(lat):4.1f}{'N' if lat >= 0 else 'S'} {abs(lon):5.1f}{'E' if lon >= 0 else 'W'}"
+            text = f"◉ {name} {coord} "
+            if cell_len(text) + 3 >= w:
+                text = f"◉ {name} "
+            width = min(cell_len(text), max(2, w - 2))
             cx, cy = int(pos[0]), int(pos[1] // 2)
-            col = cx + 2 if cx + len(text) + 2 < w else max(0, cx - len(text) - 2)
-            row = cy - 1 if cy > 1 else cy + 1
-            label = (col, max(0, min(h - 3, row)), text)
+            if cx + 2 + width <= w:
+                col, row = cx + 2, cy
+            elif cx - 2 - width >= 0:
+                col, row = cx - 2 - width, cy
+            else:  # pinned to a limb: float the label above the pin
+                col, row = (0 if cx < w // 2 else w - width), cy - 1
+            col = max(0, min(max(0, w - width), col))
+            labels.append((col, max(0, min(h - 2, row)), text, theme.P.red))
+        elif self.marker and far is not None:
+            # the pin rotated to the far side: park a dim chevron on the limb
+            fx, fy = far
+            cx, cy = w / 2.0, float(h)
+            dx, dy = fx - cx, fy - cy
+            norm = math.hypot(dx, dy)
+            if norm < 0.5:  # exactly antipodal: no direction, park it on the west limb
+                dx, dy, norm = -1.0, 0.0, 1.0
+            radius = max(4.0, min(w / 2.0, float(h)) * 0.88)
+            px, py = cx + dx / norm * radius * 0.97, cy + dy / norm * radius * 0.97
+            text = "◂ HERE" if dx <= 0 else "HERE ▸"
+            width = cell_len(text)
+            col = int(px) + 1 if dx <= 0 else int(px) - width - 1
+            col = max(0, min(w - width, col))
+            row = max(1, min(h - 2, int(py / 2)))
+            tone = theme.mix(theme.P.red, theme.P.bg, 0.35)
+            labels.append((col, row, text, tone))
 
         result = image_to_text(img, caption, hud=["ORBITAL VIEW", f"MERIDIAN {meridian}"],
-                               label=label, label_color=theme.P.red)
+                               labels=labels)
         self._frame_ms = (time.perf_counter() - start) * 1000
         return result
+
 

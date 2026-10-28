@@ -265,7 +265,28 @@ def aqi_level(aqi: float) -> tuple[str, str]:
     return "严重", "red"
 
 
+def _configured_location() -> tuple[float, float, str] | None:
+    """Exact pin from config.json: {"location": {"lat": .., "lon": .., "name": ".."}}."""
+    cfg = (storage.load_json("config.json") or {}).get("location") or {}
+    if not isinstance(cfg, dict):
+        return None
+    try:
+        lat, lon = float(cfg["lat"]), float(cfg["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0):
+        return None
+    name = str(cfg.get("name") or "").strip()
+    return lat, ((lon + 180.0) % 360.0) - 180.0, name
+
+
 def _location() -> tuple[float, float, str] | None:
+    """(lat, lon, name): config wins, else the nearest weather station from wttr.in.
+
+    wttr.in reports the closest *station*, which can sit tens of kilometres away,
+    so a fixed dashboard should pin itself with explicit coordinates.
+    """
+    pinned = _configured_location()
     blob = storage.load_json("weather.json")
     try:
         area = blob["raw"]["nearest_area"][0]
@@ -275,8 +296,13 @@ def _location() -> tuple[float, float, str] | None:
         if isinstance(lon, list):
             lon = lon[0]["value"]
         name = area.get("areaName", [{"value": ""}])[0].get("value", "")
-        return float(lat), float(lon), str(name)
+        city = str(name)
+        if pinned:
+            return pinned[0], pinned[1], pinned[2] or city
+        return float(lat), float(lon), city
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+        if pinned:
+            return pinned[0], pinned[1], pinned[2] or "HERE"
         return None
 
 

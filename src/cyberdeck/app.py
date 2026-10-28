@@ -228,8 +228,12 @@ class CyberDeck(App):
         self.refresh()
 
     def _save_config(self) -> None:
-        self.config.update({"theme": theme.P.name, "city": self.city})
-        storage.save_json("config.json", self.config)
+        # merge into what is on disk: a hand-edited "location" must survive a theme switch
+        fresh = storage.load_json("config.json") or {}
+        fresh.update(self.config)
+        fresh.update({"theme": theme.P.name, "city": self.city})
+        self.config = fresh
+        storage.save_json("config.json", fresh)
 
     def action_refresh_weather(self) -> None:
         self.query_one(WeatherPanel).refresh_weather()

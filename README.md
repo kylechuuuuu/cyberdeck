@@ -110,7 +110,44 @@ NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.c
 
 ## 地球定位标注
 
-天气数据里带回城市坐标后，地球表面会出现一个**脉动的红色标记**，旁边标着城市名；转到背面时自动隐藏（`MERIDIAN` 读数会同步显示当前正对的经线）。
+地球表面有一个红色**十字准星**：中心白点 + 呼吸圆环 + 一圈圈向外扩散的雷达脉冲，暗色底衬保证在冰盖、沙漠、亮海上都看得清。旁边标着城市名和经纬度（`◉ Tokyo 35.7N 139.7E`），位置靠边时会自动翻到另一侧。
+
+转到背面时不会直接消失，而是在地球边缘留一个暗色的 `◂ HERE` / `HERE ▸`，所以任何时刻都知道自己转到哪去了。
+
+坐标来源按优先级：
+
+1. `config.json` 里的 `location` —— 最准，常驻看板建议直接写死
+2. wttr.in 返回的最近气象站 —— 自动，但可能落在几十公里外的城市
+
+```json
+{
+  "location": { "lat": 31.2304, "lon": 121.4737, "name": "Shanghai" }
+}
+```
+
+改完 30 秒内自动生效：地球每 30 秒重读一次定位。`location` 不会因为按 `t` 换主题被覆盖。
+
+## 常驻运行
+
+```powershell
+.\run.ps1 -Loop      # 崩了自动重启；q 或 ctrl+c 仍然正常退出
+```
+
+开机自启（Windows，登录时最大化运行）：
+
+```powershell
+$act = New-ScheduledTaskAction -Execute "pwsh" `
+  -Argument "-NoProfile -File `"$HOME\Desktop\cyberdeck\run.ps1`" -Loop"
+Register-ScheduledTask -TaskName cyberdeck -Action $act `
+  -Trigger (New-ScheduledTaskTrigger -AtLogOn) -RunLevel Limited
+```
+
+长期挂着的几点：
+
+- 关掉显示器休眠再挂：`powercfg /change monitor-timeout-ac 0`（插电时），否则屏幕会先黑
+- 内存是否稳定：`uv run python tools/soak.py --seconds 180`，正常是平的，末尾三分之一持续上涨才算泄漏
+- 网络断了不会崩：行情/天气/AQI 各自失败只影响自己那块，保留上一次的数据
+- 地球自转约 11 ms/帧（10 fps ≈ 单核 11%），想更省电可以按 `space` 暂停，暂停后降到 4 fps
 
 
 ## 主题
