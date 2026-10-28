@@ -1,8 +1,8 @@
 """Rasterize the dashboard panels to PNG for visual review.
 
 Uses the same build(width, height) methods the widgets use in Textual, and
-draws each Rich Text cell with Consolas (+ YaHei for CJK), special-casing
-block elements and honouring East Asian double-width characters.
+draws each Rich Text cell with a platform monospace font (+ CJK fallback),
+special-casing block elements and honouring East Asian double-width characters.
 """
 
 from __future__ import annotations
@@ -23,11 +23,38 @@ from cyberdeck.app import hintbar_text, topbar_text  # noqa: E402
 from cyberdeck.clock import ClockPanel  # noqa: E402
 from cyberdeck.globe import GlobeEngine, image_to_text  # noqa: E402
 from cyberdeck.system import Sampler, SystemPanel  # noqa: E402
-from cyberdeck.weather import WeatherPanel, fetch_weather  # noqa: E402
+from cyberdeck.weather import DayForecast, Weather, WeatherPanel, fetch_weather  # noqa: E402
 
-FONT = ImageFont.truetype("C:/Windows/Fonts/consola.ttf", 15)
-CJK = ImageFont.truetype("C:/Windows/Fonts/simhei.ttf", 14)
-CELL_W, CELL_H = 9, 18
+
+def load_font(candidates: list[str], size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for path in candidates:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+MONO = [
+    "C:/Windows/Fonts/consola.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/SFNSMono.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+]
+CJK_FONTS = [
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+]
+FONT = load_font(MONO, 15)
+CJK = load_font(CJK_FONTS, 14)
+CELL_W = max(6, round(FONT.getlength("M")))
+CELL_H = 18
 
 
 def is_wide(ch: str) -> bool:
@@ -66,14 +93,16 @@ def draw_block(draw, x0, y0, text: Text, w: int, h: int, bg: tuple[int, int, int
     for y in range(h):
         for x in range(w):
             ch, style = grid[y][x]
+            if ch == "":
+                continue  # right half of a wide glyph, already painted by its left cell
             fg = theme.hexc(style.color.get_truecolor()) if style.color else theme.hexc(theme.P.text)
             b = style.bgcolor.get_truecolor() if style.bgcolor else bg
             px, py = x0 + x * CELL_W, y0 + y * CELL_H
-            draw.rectangle([px, py, px + CELL_W - 1, py + CELL_H - 1], fill=theme.hexc(b))
-            if ch in (" ", ""):
-                continue
             wide = is_wide(ch)
             cw = CELL_W * 2 if wide else CELL_W
+            draw.rectangle([px, py, px + cw - 1, py + CELL_H - 1], fill=theme.hexc(b))
+            if ch == " ":
+                continue
             if ch == "█":
                 draw.rectangle([px, py, px + cw - 1, py + CELL_H - 1], fill=fg)
             elif ch == "▀":
@@ -97,6 +126,30 @@ def draw_block(draw, x0, y0, text: Text, w: int, h: int, bg: tuple[int, int, int
                 draw.ellipse([px + 3, py + 8, px + 5, py + 10], fill=fg)
             else:
                 draw.text((px, py + 1), ch, font=CJK if wide else FONT, fill=fg)
+
+
+def fallback_weather() -> Weather:
+    """Deterministic sample used when wttr.in is unreachable while making docs."""
+    return Weather(
+        location="Hangzhou",
+        temp=22,
+        feels=21,
+        code=116,
+        humidity=58,
+        wind_kmph=11,
+        wind_deg=135,
+        pressure=1016,
+        visibility=10,
+        uv=3,
+        fetched=time.time(),
+        days=[
+            DayForecast("今天", 116, 17, 24),
+            DayForecast("明天", 296, 18, 25),
+            DayForecast("后天", 113, 19, 27),
+        ],
+        sunrise="06:12",
+        sunset="17:24",
+    )
 
 
 def main() -> None:
@@ -124,7 +177,7 @@ def main() -> None:
     draw_block(draw, CELL_W, cy, ClockPanel().build(30, top_h), 30, top_h, P.panel)
 
     weather = WeatherPanel()
-    weather.data = fetch_weather(None)
+    weather.data = fetch_weather("Hangzhou") or fallback_weather()  # deterministic docs location
     if weather.data:
         print("weather:", weather.data.location, weather.data.temp, "°C", len(weather.data.days), "days")
     ww = left_w - 32 - 2

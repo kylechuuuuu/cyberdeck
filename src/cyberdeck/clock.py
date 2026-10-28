@@ -42,7 +42,7 @@ class ClockPanel(Widget):
 
         # date line
         out.append("  ")
-        out.append(now.strftime("%m月%d日"), f"bold {theme.hexc(p.text)}")
+        out.append(f"{now.month:02d}月{now.day:02d}日", f"bold {theme.hexc(p.text)}")
         out.append("  " + CN_WEEK[now.weekday()], theme.hexc(p.magenta))
         out.append("  " + str(now.year), theme.hexc(p.dim))
         out.append("\n")

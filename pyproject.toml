@@ -17,6 +17,13 @@ dependencies = [
     "winrt-windows-foundation>=4!10.0.28000.2705; sys_platform == 'win32'",
     "winrt-windows-storage-streams>=4!10.0.28000.2705; sys_platform == 'win32'",
 ]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+]
 
 [project.scripts]
 cyberdeck = "cyberdeck.app:main"
