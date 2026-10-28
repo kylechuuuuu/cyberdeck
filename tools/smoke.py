@@ -108,16 +108,18 @@ async def main() -> None:
         screen = edit.screen
         print("editor:", type(screen).__name__)
         screen.query_one("#stocks", Input).value = "sh000001, sz399001, sh600519, us.AAPL"
+        screen.query_one("#location", Input).value = "30.2741, 120.1551, Hangzhou"
         screen.query_one("#todo", TextArea).text = (
             "- [x] 给地球加定位标注\n"
             "- [ ] 信息栏布局再优化\n"
             "- [ ] 写性能基准测试\n"
         )
         await pilot.press("ctrl+s")
-        await pilot.pause(0.8)
+        await pilot.pause(1.2)
         panel = edit.query_one(InfoPanel)
         print("saved stocks:", panel.stocks, "todo:", panel.state.todo)
         print("todo file:", panel._todo_file(), panel._todo_file().exists())
+        print("location cfg:", edit.config.get("location"), "marker:", edit.query_one("Globe").marker)
 
     # marker screenshot: face the location, pause, capture
     shot = CyberDeck()

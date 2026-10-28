@@ -21,7 +21,7 @@ from . import __version__, storage, theme
 from .clock import ClockPanel
 from .editor import EditorScreen
 from .extras import InfoPanel, parse_symbols
-from .geo import system_city
+from .geo import format_location, parse_location, system_city
 from .globe import Globe
 from .system import SystemPanel
 from .weather import WeatherPanel
@@ -273,7 +273,10 @@ class CyberDeck(App):
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 text = ""
-        self.push_screen(EditorScreen(panel.stocks, text), self._apply_edit)
+        self.push_screen(
+            EditorScreen(panel.stocks, text, format_location(self.config.get("location"))),
+            self._apply_edit,
+        )
 
     def _apply_edit(self, result: dict | None) -> None:
         if not result:
@@ -282,6 +285,20 @@ class CyberDeck(App):
         stocks = parse_symbols(result.get("stocks", ""))
         panel.stocks = stocks
         self.config.setdefault("info", {})["stocks"] = stocks
+
+        # manual pin: "lat, lon, city"; blank falls back to the timezone guess
+        located = parse_location((result.get("location") or "").strip())
+        if located:
+            lat, lon, name = located
+            self.config["location"] = {"lat": round(lat, 4), "lon": round(lon, 4), "name": name}
+            if name and name != self.city:
+                self.city = name
+                self._city_pinned = True
+                weather_panel = self.query_one(WeatherPanel)
+                weather_panel.city = name
+                weather_panel.refresh_weather()
+        else:
+            self.config.pop("location", None)
         self._save_config()
 
         path = panel._todo_file()
@@ -294,6 +311,7 @@ class CyberDeck(App):
         panel._load_todo()
         panel._poll_stocks()
         panel.refresh()
+        self.query_one(Globe)._refresh_location()
         self.notify(f"已保存 · 股票 {len(stocks)} 支", timeout=2)
 
     def action_theme(self, index: int) -> None:

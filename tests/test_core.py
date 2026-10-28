@@ -294,6 +294,21 @@ def test_stale_quotes_are_labelled():
     assert "m前" not in panel.build(43, 30).plain
 
 
+def test_location_round_trip():
+    from cyberdeck.geo import format_location, parse_location
+
+    assert parse_location("31.2304, 121.4737, Shanghai") == (31.2304, 121.4737, "Shanghai")
+    assert parse_location("30.2741，120.1551") == (30.2741, 120.1551, "")
+    assert parse_location("  31.2 , 121.5 ") == (31.2, 121.5, "")
+    assert parse_location("31.2") is None
+    assert parse_location("north, east") is None
+    assert parse_location("95, 120") is None  # latitude out of range
+    cfg = {"lat": 30.2741, "lon": 120.1551, "name": "Hangzhou"}
+    assert format_location(cfg) == "30.2741, 120.1551, Hangzhou"
+    assert format_location(None) == ""
+    assert parse_location(format_location(cfg)) == (30.2741, 120.1551, "Hangzhou")
+
+
 def test_system_city_mapping():
     from cyberdeck.geo import city_for_iana, city_for_windows_tz
 

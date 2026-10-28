@@ -87,3 +87,31 @@ def system_city() -> str | None:
     if sys.platform == "win32":
         return city_for_windows_tz(_windows_tz())
     return city_for_iana(_iana_key())
+
+
+def parse_location(text: str) -> tuple[float, float, str] | None:
+    """'31.23, 121.47, Shanghai' -> (31.23, 121.47, 'Shanghai'), None if invalid."""
+    parts = [part.strip() for part in text.replace("，", ",").split(",")]
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        return None
+    try:
+        lat, lon = float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+    if not -90.0 <= lat <= 90.0:
+        return None
+    lon = ((lon + 180.0) % 360.0) - 180.0
+    return round(lat, 6), round(lon, 6), ",".join(parts[2:]).strip()
+
+
+def format_location(cfg: object) -> str:
+    """Config location dict -> the string shown in the editor."""
+    if not isinstance(cfg, dict):
+        return ""
+    try:
+        lat, lon = float(cfg["lat"]), float(cfg["lon"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    name = str(cfg.get("name") or "").strip()
+    text = f"{lat:.4f}, {lon:.4f}"
+    return f"{text}, {name}" if name else text

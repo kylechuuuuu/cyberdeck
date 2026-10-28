@@ -7,6 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
+
+from svgfix import fix_svg_text  # noqa: E402
 
 # redact before the app renders anything
 socket.gethostname = lambda: "workstation"  # noqa: E731
@@ -49,6 +52,7 @@ CJK = "Microsoft YaHei" if sys.platform == "win32" else "PingFang SC" if sys.pla
 svg = (OUT / "preview.svg").read_text(encoding="utf-8")
 svg = svg.replace('font-family: "Fira Code";', f'font-family: "{FONT}";')
 svg = svg.replace("font-family: Fira Code, monospace;", f"font-family: {FONT}, monospace;")
+svg = fix_svg_text(svg)  # Textual counts CJK as one cell; give them two
 png = bytes(resvg_py.svg_to_bytes(
     svg, width=1920, monospace_family=FONT, sans_serif_family=CJK,
 ))
