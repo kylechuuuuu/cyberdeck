@@ -160,8 +160,9 @@ One dialog, three things:
 - **Location**: `lat, lon, city` (`30.2741, 120.1551, Hangzhou`); leave it blank to fall back to the timezone
 - **Todo**: one item per line, `[x]` for done, `#` for comments
 
-`Ctrl+S` saves (writes `config.json` and `todo.txt`, and moves the pin and weather city
-immediately), `Esc` cancels. The files can be edited directly too — panels re-read them
+`Ctrl+S` / `F2` saves (writes `config.json` and `todo.txt`, and moves the pin and weather city
+immediately). macOS terminals may swallow `Ctrl+S` as XOFF flow control, so use `F2`, or
+press `Enter` while the location field is focused. `Esc` cancels. The files can be edited directly too — panels re-read them
 on mtime.
 
 ## Globe location pin

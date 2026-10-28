@@ -579,3 +579,10 @@ def test_weather_city_uses_pin_coords(monkeypatch):
     assert app._weather_city() == "30.0000,120.0000"
     app.config["location"]["name"] = "Hangzhou"
     assert app._weather_city() == "Hangzhou"
+
+
+def test_editor_save_keys():
+    from cyberdeck.editor import EditorScreen
+
+    keys = {binding.key for binding in EditorScreen.BINDINGS}
+    assert {"ctrl+s", "super+s", "f2", "escape"} <= keys
