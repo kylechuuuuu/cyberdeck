@@ -8,6 +8,8 @@ Apple GPU（IOKit，无需 sudo）、APFS 卷、热降频 / 内存压力和电�
 
 ![preview](docs/preview.png)
 
+macOS 实机预览：[docs/preview-macos.png](docs/preview-macos.png)（Apple M5 / ioreg GPU / P-E 核心）
+
 ```
 ┌ CYBERDECK ──────────────────────────────────────────────────────────────────┐
 │ 23:41  │ CPU 每核条形 + 波形 │ MEM │ DISK │ 进程表（整宽） │ TIME 进度/世界时钟 │
@@ -153,13 +155,14 @@ NVIDIA 显卡走 `nvidia-smi`；配置走 `$XDG_CONFIG_HOME/cyberdeck` 或 `~/.c
 | 逐时 | 未来 8 小时温度/天气 + 温度曲线 | wttr.in 缓存 |
 | NET | 延迟/抖动/丢包 + AQI/PM2.5 | TCP 握手 + Open-Meteo |
 | stocks | 上证/深证/个股（`sh`/`sz`/`us` 前缀） | 腾讯行情 |
-| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）+ Pillow；macOS / Linux 显示「未在播放」 |
+| media | 专辑封面 + 律动条 + 标题/歌手/专辑 + 渐变进度条（时间轴外推，1s 刷新） | Windows 媒体会话（winrt）；macOS 控制 Music / Spotify；Linux 显示「未在播放」 |
 | todo | 待办清单 | `todo_file` 或各平台数据目录下的 `todo.txt` |
 | notes | 自由便签（任意文本，最多 10 行） | `notes_file` 或各平台数据目录下的 `notes.txt` |
 
 - `modules` 里删掉某一项即可隐藏该模块；想加行情就把代码写进 `stocks`（如 `us.AAPL`、`hk.HSIC`）。
 - 待办文件格式：每行一条，`[ ]` 未完成、`[x]` 已完成，`#` 开头是注释。
-- 网络类模块失败只显示 `--`，不会卡界面；`media` 在非 Windows 或缺少 winrt 时自动隐藏内容。
+- 网络类模块失败只显示 `--`，不会卡界面；`media` 在没有 winrt（Windows 以外）时：macOS 走 AppleScript 读取 Music / Spotify，Linux 显示「未在播放」。
+- macOS 首次读取 Music / Spotify 时，系统会请求「自动化」权限；拒绝后音乐卡保持未播放，不影响其他模块。Spotify 会尝试拉取专辑封面，Music.app 只显示文字信息。
 
 ## 性能
 
@@ -236,7 +239,7 @@ uv run pytest -q
 uv run ruff check src tests tools
 uv run python tools/build_landmask.py   # 重新下载海岸线并烘焙掩膜
 uv run python tools/smoke.py           # 无头跑一遍，导出 SVG 截图
-uv run python tools/make_preview.py    # 重新生成 docs/preview.png
+uv run python tools/make_preview.py    # Windows → docs/preview.png；macOS → docs/preview-macos.png
 ```
 
 `tools/preview_dash.py` 会按平台自动挑选等宽字体 / 中文字体（macOS 用 Menlo + 冬青黑体，

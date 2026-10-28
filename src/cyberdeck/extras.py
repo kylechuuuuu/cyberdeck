@@ -10,7 +10,9 @@ import contextlib
 import json
 import math
 import re
+import shutil
 import socket
+import subprocess
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -35,10 +37,12 @@ except Exception:  # pragma: no cover - optional dependency
     HAS_LUNAR = False
 
 IS_WIN = False
+IS_MAC = False
 try:
     import sys
 
     IS_WIN = sys.platform == "win32"
+    IS_MAC = sys.platform == "darwin"
 except Exception:  # pragma: no cover
     pass
 
@@ -350,7 +354,145 @@ def fetch_air(lat: float, lon: float) -> Air | None:
         return None
 
 
+def parse_mac_media(text: str, duration_ms: bool = False) -> Media | None:
+    """Parse `osascript` output: title, artist, album, position, duration, state."""
+    lines = [line.strip() for line in text.strip().splitlines()]
+    if len(lines) < 6 or not lines[0]:
+        return None
+    title, artist, album, pos, dur, state = lines[:6]
+    try:
+        position = max(0.0, float(pos.replace(",", ".")))
+        duration = max(0.0, float(dur.replace(",", ".")))
+    except ValueError:
+        return None
+    if duration_ms and duration > 1000:  # Spotify reports milliseconds
+        duration /= 1000.0
+    if duration > 0:
+        position = min(position, duration)
+    return Media(
+        title=title,
+        artist=artist,
+        playing=state.lower() == "playing",
+        position=position,
+        duration=duration,
+        album=album,
+        cover=None,
+        stamp=time.monotonic(),
+    )
+
+
+_MAC_COVERS: dict[str, bytes] = {}
+
+_MAC_MUSIC_SCRIPT = """
+if application "Music" is running then
+  tell application "Music"
+    if player state is not stopped then
+      set tr to current track
+      return (name of tr) & linefeed & (artist of tr) & linefeed & (album of tr) & linefeed & (player position as string) & linefeed & (duration of tr as string) & linefeed & (player state as string)
+    end if
+  end tell
+end if
+return ""
+"""
+
+_MAC_SPOTIFY_SCRIPT = """
+if application "Spotify" is running then
+  tell application "Spotify"
+    if player state is not stopped then
+      set tr to current track
+      set art to ""
+      try
+        set art to artwork url of tr
+      end try
+      return (name of tr) & linefeed & (artist of tr) & linefeed & (album of tr) & linefeed & (player position as string) & linefeed & (duration of tr as string) & linefeed & (player state as string) & linefeed & art
+    end if
+  end tell
+end if
+return ""
+"""
+
+
+def _download_cover(url: str, limit: int = 800_000) -> bytes | None:
+    if not url.lower().startswith(("http://", "https://")):
+        return None
+    if url in _MAC_COVERS:
+        return _MAC_COVERS[url]
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "cyberdeck/0.2"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = resp.read(limit + 1)
+    except Exception:
+        return None
+    if not data or len(data) > limit:
+        return None
+    if len(_MAC_COVERS) > 8:
+        _MAC_COVERS.clear()
+    _MAC_COVERS[url] = data
+    return data
+
+
+def fetch_mac_media() -> Media | None:
+    """Now playing from Music.app / Spotify via AppleScript (no extra tools)."""
+    exe = shutil.which("osascript")
+    if not exe:
+        return None
+    players = [
+        ("Spotify", ("/Applications/Spotify.app", str(Path.home() / "Applications" / "Spotify.app")), True, True),
+        ("Music", ("/System/Applications/Music.app", "/Applications/Music.app"), False, False),
+    ]
+    found: list[Media] = []
+    for _name, paths, duration_ms, has_art in players:
+        if not any(Path(path).exists() for path in paths):
+            continue
+        script = _MAC_SPOTIFY_SCRIPT if has_art else _MAC_MUSIC_SCRIPT
+        try:
+            proc = subprocess.run(
+                [exe, "-e", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=4,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode != 0 and has_art:  # older Spotify dictionaries may not have `artwork url`
+            fallback = _MAC_MUSIC_SCRIPT.replace('"Music"', '"Spotify"')
+            try:
+                proc = subprocess.run(
+                    [exe, "-e", fallback],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=4,
+                    check=False,
+                )
+                has_art = False
+            except (OSError, subprocess.SubprocessError):
+                continue
+        if proc.returncode != 0 or not proc.stdout.strip():
+            continue
+        media = parse_mac_media(proc.stdout, duration_ms)
+        if media is None:
+            continue
+        if has_art:
+            lines = proc.stdout.strip().splitlines()
+            if len(lines) > 6:
+                media.cover = _download_cover(lines[6].strip())
+        found.append(media)
+    if not found:
+        return None
+    for media in found:
+        if media.playing:
+            return media
+    return found[0]
+
+
 def fetch_media() -> Media | None:
+    if IS_MAC:
+        return fetch_mac_media()
     if not IS_WIN:
         return None
     try:

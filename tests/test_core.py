@@ -410,3 +410,32 @@ def test_mac_storage_locations():
     config = storage.data_path("config.json")
     assert weather is not None and "Library/Caches/cyberdeck" in str(weather)
     assert config is not None and "Library/Application Support/cyberdeck" in str(config)
+
+
+def test_parse_mac_media():
+    from cyberdeck.extras import parse_mac_media
+
+    media = parse_mac_media("Song\nArtist\nAlbum\n12.5\n227\nplaying\n")
+    assert media is not None
+    assert (media.title, media.artist, media.album) == ("Song", "Artist", "Album")
+    assert media.playing and media.position == 12.5 and media.duration == 227.0
+
+    spotify = parse_mac_media("Song\nArtist\nAlbum\n12.5\n227000\npaused\n", duration_ms=True)
+    assert spotify is not None and spotify.duration == 227.0 and not spotify.playing
+    assert parse_mac_media("") is None
+    assert parse_mac_media("title\nartist\nalbum\nbad\ntime\nplaying") is None
+
+
+def test_album_art_renders():
+    import io
+
+    from PIL import Image
+
+    from cyberdeck.extras import Media
+
+    panel = InfoPanel({"info": {"modules": ["media"], "zones": ["UTC"]}})
+    buf = io.BytesIO()
+    Image.new("RGB", (24, 24), (200, 30, 90)).save(buf, "PNG")
+    panel.state.media = Media("Song", "Artist", True, 12.0, 227.0, "Album", buf.getvalue(), time.monotonic())
+    text = panel.build(50, 30).plain
+    assert "Song" in text and "▀" in text
