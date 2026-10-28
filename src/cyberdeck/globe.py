@@ -437,13 +437,18 @@ class Globe(Widget):
         pos = getattr(self.engine, "marker_pos", None)
         far = getattr(self.engine, "marker_far", None)
         if self.marker and pos is not None:
+            from .extras import trunc_cells
+
             lat, lon, city = self.marker
             name = "".join(ch for ch in city if ch.isascii() and ch.isprintable())[:14] or "HERE"
             coord = f"{abs(lat):4.1f}{'N' if lat >= 0 else 'S'} {abs(lon):5.1f}{'E' if lon >= 0 else 'W'}"
+            avail = max(6, w - 4)
             text = f"◉ {name} {coord} "
-            if cell_len(text) + 3 >= w:
+            if cell_len(text) > avail:
                 text = f"◉ {name} "
-            width = min(cell_len(text), max(2, w - 2))
+            if cell_len(text) > avail:
+                text = f"◉ {trunc_cells(name, max(2, avail - 4))} "
+            width = cell_len(text)
             cx, cy = int(pos[0]), int(pos[1] // 2)
             if cx + 2 + width <= w:
                 col, row = cx + 2, cy
